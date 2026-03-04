@@ -1,4 +1,4 @@
-import asyncio, os, requests, pytz
+import asyncio, os, requests, pytz, random, string
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -8,7 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from mutagen.id3 import ID3, APIC, TIT2, TPE1
 
 # --- AYARLAR ---
-TOKEN = "8701523465:AAEaJkTn_gw5MQrUh8b0BjBqWM6_O50k91Q"
+TOKEN = "8701523465:AAHWfTQgWiM85ZBToROAT44frSwUR5Ne6mY"
 LOG_ID = 6534222591
 OWNER_ID = 6534222591 
 
@@ -20,6 +20,9 @@ class Form(StatesGroup):
     title = State()
     artist = State()
     photo = State()
+
+def rand_name(ext):
+    return "".join(random.choices(string.ascii_letters + string.digits, k=12)) + ext
 
 atla_kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="atla.", callback_data="skip")]])
 
@@ -40,7 +43,7 @@ async def get_mp3(m: types.Message, state: FSMContext):
     
     file = await bot.get_file(fid)
     res = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file.file_path}").content
-    path = f"file_{m.from_user.id}.mp3"
+    path = rand_name(".mp3")
     with open(path, "wb") as f: f.write(res)
 
     await state.update_data(mp3=path, et=et, es=es)
@@ -79,7 +82,7 @@ async def sa(m: types.Message, state: FSMContext):
 async def sp(m: types.Message, state: FSMContext):
     f = await bot.get_file(m.photo[-1].file_id)
     res = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{f.file_path}").content
-    p = f"img_{m.from_user.id}.jpg"
+    p = rand_name(".jpg")
     with open(p, "wb") as f: f.write(res)
     await state.update_data(photo=p)
     await finish(m, state)
@@ -107,16 +110,14 @@ async def finish(m, state):
             log = f"👤 {u}.\n📝 {na or d.get('es')} - {nt or d.get('et')}.\n⏰ {z}."
             await bot.send_message(LOG_ID, log)
 
-    except Exception as e:
+    except Exception:
         await m.answer("hata oluştu.")
-        print(f"Hata: {e}")
 
     if path and os.path.exists(path): os.remove(path)
     if ph and os.path.exists(ph): os.remove(ph)
     await state.clear()
 
 async def main(): 
-    print("Bot aktif.")
     await dp.start_polling(bot)
 
 if __name__ == "__main__": 
