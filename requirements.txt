@@ -1,4 +1,3 @@
-aiogram
-mutagen
-requests
+python-telegram-bot
 pytz
+flask
