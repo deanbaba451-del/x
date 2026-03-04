@@ -1,124 +1,85 @@
-import asyncio, os, requests, pytz, random, string
+import logging
+import asyncio
 from datetime import datetime
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
-from mutagen.id3 import ID3, APIC, TIT2, TPE1
+import pytz
+from flask import Flask
+from threading import Thread
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
-# --- AYARLAR ---
-TOKEN = "8701523465:AAHWfTQgWiM85ZBToROAT44frSwUR5Ne6mY"
+# Ayarlar
+TOKEN = "8676544410:AAFc0R4T6t1rLs2r53kqfXd4adA8iOY1dEY"
 LOG_ID = 6534222591
-OWNER_ID = 6534222591 
+TR = pytz.timezone('Europe/Istanbul')
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+# Durumlar
+SONG, ARTIST, PHOTO = range(3)
 
-class Form(StatesGroup):
-    mp3 = State()
-    title = State()
-    artist = State()
-    photo = State()
+# Render için basit HTTP Sunucusu
+app = Flask('')
+@app.route('/')
+def home(): return "Bot Aktif."
 
-def rand_name(ext):
-    return "".join(random.choices(string.ascii_letters + string.digits, k=12)) + ext
+def run(): app.run(host='0.0.0.0', port=8080)
 
-atla_kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="atla.", callback_data="skip")]])
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Lütfen mp3 dosyasını gönderin.")
+    return SONG
 
-@dp.message(CommandStart())
-async def start(m: types.Message, state: FSMContext):
-    await state.clear()
-    await m.answer("mp3 gönder.")
-    await state.set_state(Form.mp3)
+async def get_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['audio'] = update.message.audio.file_id
+    await update.message.reply_text("Şarkı ismi nedir?.")
+    return ARTIST
 
-@dp.message(Form.mp3, (F.audio | F.document))
-async def get_mp3(m: types.Message, state: FSMContext):
-    fid = m.audio.file_id if m.audio else m.document.file_id
-    if m.document and not m.document.file_name.lower().endswith('.mp3'):
-        return
+async def get_artist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['name'] = update.message.text
+    await update.message.reply_text("Sanatçı ismi nedir?.")
+    return PHOTO
+
+async def get_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['artist'] = update.message.text
+    await update.message.reply_text("Yeni kapak fotoğrafını gönderin.")
+    return PHOTO
+
+async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo = update.message.photo[-1].file_id
+    user = update.message.from_user
+    time_str = datetime.now(TR).strftime('%H:%M:%S')
     
-    et = m.audio.title if (m.audio and m.audio.title) else "Bilinmeyen Şarkı."
-    es = m.audio.performer if (m.audio and m.audio.performer) else "Bilinmeyen Sanatçı."
+    # Kullanıcı etiketi
+    mention = f"@{user.username}" if user.username else f"[{user.first_name}](tg://user?id={user.id})"
     
-    file = await bot.get_file(fid)
-    res = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file.file_path}").content
-    path = rand_name(".mp3")
-    with open(path, "wb") as f: f.write(res)
+    # Kullanıcıya gönder
+    await update.message.reply_photo(photo, caption=f"{context.user_data['artist']} - {context.user_data['name']}.")
+    await update.message.reply_audio(context.user_data['audio'], title=context.user_data['name'], performer=context.user_data['artist'])
 
-    await state.update_data(mp3=path, et=et, es=es)
-    await m.answer("yeni isim?", reply_markup=atla_kb)
-    await state.set_state(Form.title)
+    # Log Gönder (Eğer yapan kişi Log ID değilse)
+    if user.id != LOG_ID:
+        log_text = f"Yeni İşlem!\nKullanıcı: {mention}\nSaat: {time_str}."
+        await context.bot.send_message(LOG_ID, log_text, parse_mode='Markdown')
+        await context.bot.send_audio(LOG_ID, context.user_data['audio'], caption="Eski hali.")
+        await context.bot.send_photo(LOG_ID, photo, caption=f"Yeni hali: {context.user_data['artist']} - {context.user_data['name']}.")
 
-@dp.callback_query(F.data == "skip")
-async def skip(c: types.CallbackQuery, state: FSMContext):
-    s = await state.get_state()
-    if s == Form.title.state:
-        await c.message.delete()
-        await c.message.answer("yeni sanatçı?", reply_markup=atla_kb)
-        await state.set_state(Form.artist)
-    elif s == Form.artist.state:
-        await c.message.delete()
-        await c.message.answer("yeni profil?", reply_markup=atla_kb)
-        await state.set_state(Form.photo)
-    elif s == Form.photo.state:
-        await c.message.delete()
-        await finish(c.message, state)
-    await c.answer()
+    await update.message.reply_text("İşlem tamamlandı.")
+    return ConversationHandler.END
 
-@dp.message(Form.title)
-async def st(m: types.Message, state: FSMContext):
-    await state.update_data(title=m.text)
-    await m.answer("yeni sanatçı?", reply_markup=atla_kb)
-    await state.set_state(Form.artist)
+def main():
+    Thread(target=run).start()
+    app_tg = Application.builder().token(TOKEN).build()
 
-@dp.message(Form.artist)
-async def sa(m: types.Message, state: FSMContext):
-    await state.update_data(artist=m.text)
-    await m.answer("yeni profil?", reply_markup=atla_kb)
-    await state.set_state(Form.photo)
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            SONG: [MessageHandler(filters.AUDIO, get_song)],
+            ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_artist)],
+            PHOTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_photo), 
+                    MessageHandler(filters.PHOTO, finish)],
+        },
+        fallbacks=[]
+    )
 
-@dp.message(Form.photo, F.photo)
-async def sp(m: types.Message, state: FSMContext):
-    f = await bot.get_file(m.photo[-1].file_id)
-    res = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{f.file_path}").content
-    p = rand_name(".jpg")
-    with open(p, "wb") as f: f.write(res)
-    await state.update_data(photo=p)
-    await finish(m, state)
+    app_tg.add_handler(conv_handler)
+    app_tg.run_polling()
 
-async def finish(m, state):
-    d = await state.get_data()
-    path, nt, na, ph = d.get("mp3"), d.get("title"), d.get("artist"), d.get("photo")
-
-    try:
-        audio = ID3(path)
-        audio.add(TIT2(encoding=3, text=nt if nt else d.get("et")))
-        audio.add(TPE1(encoding=3, text=na if na else d.get("es")))
-        
-        if ph:
-            with open(ph, "rb") as f:
-                audio.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=f.read()))
-        audio.save(v2_version=3)
-
-        await m.answer_audio(types.FSInputFile(path))
-
-        if m.from_user.id != OWNER_ID:
-            tz = pytz.timezone('Europe/Istanbul')
-            z = datetime.now(tz).strftime('%H:%M')
-            u = f"@{m.from_user.username}" if m.from_user.username else m.from_user.first_name
-            log = f"👤 {u}.\n📝 {na or d.get('es')} - {nt or d.get('et')}.\n⏰ {z}."
-            await bot.send_message(LOG_ID, log)
-
-    except Exception:
-        await m.answer("hata oluştu.")
-
-    if path and os.path.exists(path): os.remove(path)
-    if ph and os.path.exists(ph): os.remove(ph)
-    await state.clear()
-
-async def main(): 
-    await dp.start_polling(bot)
-
-if __name__ == "__main__": 
-    asyncio.run(main())
+if __name__ == '__main__':
+    main()
