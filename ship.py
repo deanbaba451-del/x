@@ -8,7 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from mutagen.id3 import ID3, APIC, TIT2, TPE1
 
 # --- AYARLAR ---
-TOKEN = "8701523465:AAFElcMm72FKQS4C-WQf-NHJh9IdTwnKb0w"
+TOKEN = "8701523465:AAEaJkTn_gw5MQrUh8b0BjBqWM6_O50k91Q"
 LOG_ID = 6534222591
 OWNER_ID = 6534222591 
 
@@ -35,13 +35,11 @@ async def get_mp3(m: types.Message, state: FSMContext):
     if m.document and not m.document.file_name.lower().endswith('.mp3'):
         return
     
-    # Mevcut bilgileri al
     et = m.audio.title if (m.audio and m.audio.title) else "Bilinmeyen Şarkı."
     es = m.audio.performer if (m.audio and m.audio.performer) else "Bilinmeyen Sanatçı."
     
     file = await bot.get_file(fid)
     res = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file.file_path}").content
-    # Çakışma olmaması için kullanıcı ID'li isim kullanıyoruz
     path = f"file_{m.from_user.id}.mp3"
     with open(path, "wb") as f: f.write(res)
 
@@ -91,7 +89,6 @@ async def finish(m, state):
     path, nt, na, ph = d.get("mp3"), d.get("title"), d.get("artist"), d.get("photo")
 
     try:
-        # ID3 Etiketleme
         audio = ID3(path)
         audio.add(TIT2(encoding=3, text=nt if nt else d.get("et")))
         audio.add(TPE1(encoding=3, text=na if na else d.get("es")))
@@ -101,10 +98,8 @@ async def finish(m, state):
                 audio.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=f.read()))
         audio.save(v2_version=3)
 
-        # Şarkıyı gönder
         await m.answer_audio(types.FSInputFile(path))
 
-        # Log sistemi (Owner değilse çalışır)
         if m.from_user.id != OWNER_ID:
             tz = pytz.timezone('Europe/Istanbul')
             z = datetime.now(tz).strftime('%H:%M')
@@ -113,11 +108,9 @@ async def finish(m, state):
             await bot.send_message(LOG_ID, log)
 
     except Exception as e:
-        # Hata durumunda kullanıcıya bilgi ver
-        await m.answer("işlem sırasında hata oluştu.")
-        print(f"Hata detayı: {e}")
+        await m.answer("hata oluştu.")
+        print(f"Hata: {e}")
 
-    # Dosya temizliği (Sadece dosya varsa sil)
     if path and os.path.exists(path): os.remove(path)
     if ph and os.path.exists(ph): os.remove(ph)
     await state.clear()
