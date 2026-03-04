@@ -10,13 +10,12 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from mutagen.easyid3 import EasyID3
 from mutagen.id3 import ID3, APIC, TIT2, TPE1
 
 # --- AYARLAR ---
 TOKEN = "8701523465:AAEx_og1B72TwnH0x6qf40ZpzZfk6z9YKmA"
 LOG_ID = 6534222591
-OWNER_ID = 6534222591  # Log ID ile aynı yaptık, bu ID işlem yapınca log gitmeyecek.
+OWNER_ID = 6534222591 # Senin ID'n
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -33,15 +32,26 @@ skip_kb = InlineKeyboardMarkup(
 
 @dp.message(CommandStart())
 async def start(m: types.Message, state: FSMContext):
-    await m.answer("Lütfen düzenlemek istediğiniz mp3 dosyasını gönderin.")
+    await state.clear()
+    await m.answer("🎵 Hoş geldin! Lütfen düzenlemek istediğin **mp3 dosyasını** gönder.")
     await state.set_state(Form.mp3)
 
-@dp.message(Form.mp3, F.audio)
+# Hem Audio hem Document (MP3) kabul etmesi için güncellendi
+@dp.message(Form.mp3, (F.audio | F.document))
 async def get_mp3(m: types.Message, state: FSMContext):
-    old_title = m.audio.title or "Bilinmiyor"
-    old_artist = m.audio.performer or "Bilinmiyor"
+    # Dosya ID'sini al
+    file_id = m.audio.file_id if m.audio else m.document.file_id
     
-    file = await bot.get_file(m.audio.file_id)
+    # MP3 kontrolü
+    if m.document and not m.document.file_name.endswith('.mp3'):
+        return await m.answer("Lütfen sadece .mp3 formatında dosya gönder.")
+
+    old_title = m.audio.title if (m.audio and m.audio.title) else "Bilinmiyor"
+    old_artist = m.audio.performer if (m.audio and m.audio.performer) else "Bilinmiyor"
+    
+    msg = await m.answer("⏳ Dosya indiriliyor, lütfen bekleyin...")
+    
+    file = await bot.get_file(file_id)
     content = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file.file_path}").content
 
     file_name = f"temp_{m.from_user.id}.mp3"
@@ -49,17 +59,17 @@ async def get_mp3(m: types.Message, state: FSMContext):
         f.write(content)
 
     await state.update_data(mp3=file_name, old_t=old_title, old_a=old_artist)
-    await m.answer(f"Eski İsim: {old_title}\nYeni şarkı ismi yazın:", reply_markup=skip_kb)
+    await msg.edit_text(f"✅ İndirildi.\n\n**Eski İsim:** {old_title}\n**Yeni şarkı ismi ne olsun?**", reply_markup=skip_kb, parse_mode="Markdown")
     await state.set_state(Form.title)
 
 @dp.callback_query(F.data == "skip")
 async def skip(c: types.CallbackQuery, state: FSMContext):
     curr = await state.get_state()
     if curr == Form.title.state:
-        await c.message.answer("Yeni sanatçı adı yazın:", reply_markup=skip_kb)
+        await c.message.answer("Yeni sanatçı adı ne olsun?", reply_markup=skip_kb)
         await state.set_state(Form.artist)
     elif curr == Form.artist.state:
-        await c.message.answer("Yeni kapak fotoğrafı gönderin:", reply_markup=skip_kb)
+        await c.message.answer("Yeni kapak fotoğrafını (Kare olması önerilir) gönder:", reply_markup=skip_kb)
         await state.set_state(Form.photo)
     elif curr == Form.photo.state:
         await finish_process(c.message, state)
@@ -68,13 +78,13 @@ async def skip(c: types.CallbackQuery, state: FSMContext):
 @dp.message(Form.title)
 async def set_title(m: types.Message, state: FSMContext):
     await state.update_data(title=m.text)
-    await m.answer("Yeni sanatçı adı yazın:", reply_markup=skip_kb)
+    await m.answer("Yeni sanatçı adı ne olsun?", reply_markup=skip_kb)
     await state.set_state(Form.artist)
 
 @dp.message(Form.artist)
 async def set_artist(m: types.Message, state: FSMContext):
     await state.update_data(artist=m.text)
-    await m.answer("Yeni kapak fotoğrafı gönderin:", reply_markup=skip_kb)
+    await m.answer("Yeni kapak fotoğrafını gönder:", reply_markup=skip_kb)
     await state.set_state(Form.photo)
 
 @dp.message(Form.photo, F.photo)
@@ -94,49 +104,47 @@ async def finish_process(m, state):
     new_a = data.get("artist")
     photo_path = data.get("photo")
 
-    # Kapak Fotoğrafı ve Bilgi Gömme (ID3v2.3)
-    audio = ID3(audio_path)
-    if new_t:
-        audio.add(TIT2(encoding=3, text=new_t))
-    if new_a:
-        audio.add(TPE1(encoding=3, text=new_a))
-    
-    if photo_path:
-        with open(photo_path, "rb") as f:
-            audio.add(APIC(
-                encoding=3,
-                mime='image/jpeg',
-                type=3,
-                desc=u'Cover',
-                data=f.read()
-            ))
-    audio.save(v2_version=3)
+    await m.answer("⚙️ Dosya işleniyor ve kapak fotoğrafı gömülüyor...")
 
-    await m.answer_audio(types.FSInputFile(audio_path), caption="✅ Şarkı başarıyla düzenlendi ve kapak fotoğrafı eklendi!")
+    try:
+        # Etiketleme ve Resim Gömme
+        audio = ID3(audio_path)
+        if new_t: audio.add(TIT2(encoding=3, text=new_t))
+        if new_a: audio.add(TPE1(encoding=3, text=new_a))
+        if photo_path:
+            with open(photo_path, "rb") as f:
+                audio.add(APIC(encoding=3, mime='image/jpeg', type=3, desc=u'Cover', data=f.read()))
+        audio.save(v2_version=3)
 
-    # LOGLAMA (Eğer işlemi yapan owner değilse)
-    if m.from_user.id != OWNER_ID:
-        tr_tz = pytz.timezone('Europe/Istanbul')
-        now = datetime.now(tr_tz)
-        saat_tarih = now.strftime('%d.%m.%Y | %H:%M:%S')
+        # Gönderim
+        await m.answer_audio(types.FSInputFile(audio_path), caption="✨ İşlem başarıyla tamamlandı!")
 
-        user_info = f"@{m.from_user.username}" if m.from_user.username else f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})"
-        
-        log_text = (
-            f"🎵 **Yeni Düzenleme**\n\n"
-            f"👤 **Kullanıcı:** {user_info}\n"
-            f"📥 **Eski:** {data.get('old_a')} - {data.get('old_t')}\n"
-            f"📤 **Yeni:** {new_a or 'Değişmedi'} - {new_t or 'Değişmedi'}\n"
-            f"⏰ **Zaman:** `{saat_tarih}`"
-        )
-        await bot.send_message(LOG_ID, log_text, parse_mode="Markdown")
+        # Log (Owner değilse)
+        if m.from_user.id != OWNER_ID:
+            tr_tz = pytz.timezone('Europe/Istanbul')
+            saat_tarih = datetime.now(tr_tz).strftime('%d.%m.%Y | %H:%M:%S')
+            user = m.from_user
+            u_link = f"@{user.username}" if user.username else f"[{user.first_name}](tg://user?id={user.id})"
+            
+            log_text = (
+                f"🎵 **Şarkı Düzenlendi**\n"
+                f"👤 **Kullanıcı:** {u_link}\n"
+                f"📥 **Eski:** {data.get('old_a')} - {data.get('old_t')}\n"
+                f"📤 **Yeni:** {new_a or 'Aynı'} - {new_t or 'Aynı'}\n"
+                f"⏰ **Zaman:** `{saat_tarih}`"
+            )
+            await bot.send_message(LOG_ID, log_text, parse_mode="Markdown")
 
-    # Dosya temizliği
+    except Exception as e:
+        await m.answer(f"❌ Bir hata oluştu: {e}")
+
+    # Temizlik
     if os.path.exists(audio_path): os.remove(audio_path)
     if photo_path and os.path.exists(photo_path): os.remove(photo_path)
     await state.clear()
 
 async def main():
+    print("Bot çalışıyor...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
