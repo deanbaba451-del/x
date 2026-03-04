@@ -10,7 +10,7 @@ from mutagen.id3 import ID3, APIC
 import requests
 import os
 
-TOKEN = "8701523465:AAEx_og1B72TwnH0x6qf40ZpzZfk6z9YKm"
+TOKEN = "8701523465:AAEx_og1B72TwnH0x6qf40ZpzZfk6z9YKmA"
 LOG_ID = 6534222591
 
 bot = Bot(token=TOKEN)
