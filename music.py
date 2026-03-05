@@ -6,8 +6,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, APIC
 
-# --- AYARLAR ---
-TOKEN = "8676544410:AAHiCQiN3bf3AhvYMnC5arsNeU2cNIavj2k"
+# --- SETTINGS ---
+TOKEN = "8676544410:AAHiCQiN3bf3AhvYMnC5arsNeU2cNIavj2k" # Yeni token eklendi
 OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
@@ -15,7 +15,7 @@ TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
 GET_MP3, GET_TITLE, GET_ARTIST, GET_PHOTO = range(4)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("mp3 dosyasını gönderin. / send the mp3 file.")
+    await update.message.reply_text("send the mp3 file.")
     return GET_MP3
 
 async def handle_mp3(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24,17 +24,17 @@ async def handle_mp3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive(file_path)
     context.user_data['path'] = file_path
     context.user_data['old'] = update.message.effective_attachment.file_name
-    await update.message.reply_text("yeni şarkı ismini yazın. / enter the new song title.")
+    await update.message.reply_text("enter the new song title.")
     return GET_TITLE
 
 async def handle_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['title'] = update.message.text
-    await update.message.reply_text("yeni sanatçı ismini yazın. / enter the new artist name.")
+    await update.message.reply_text("enter the new artist name.")
     return GET_ARTIST
 
 async def handle_artist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['artist'] = update.message.text
-    await update.message.reply_text("yeni kapak fotoğrafını gönderin. / send the new cover photo.")
+    await update.message.reply_text("send the new cover photo.")
     return GET_PHOTO
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,21 +59,23 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_name = f"{artist} - {title}.mp3"
         await update.message.reply_document(document=open(path, 'rb'), filename=new_name)
         
-        # Log Sistemi
+        # Log System
         user = update.message.from_user
         if user.id != OWNER_ID:
             now = datetime.datetime.now(TR_TIMEZONE).strftime("%H:%M:%S")
+            # Mention or profile link
             mention = f"@{user.username}" if user.username else f"[{user.first_name}](tg://user?id={user.id})"
-            log = (f"log: {mention} ({user.id})\neski: {context.user_data['old']}\nyeni: {new_name}\nsaat: {now}")
+            
+            log = (f"log: {mention} ({user.id})\nold: {context.user_data['old']}\nnew: {new_name}\ntime: {now}")
             await context.bot.send_message(chat_id=LOG_ID, text=log, parse_mode='Markdown')
 
     except Exception as e:
-        await update.message.reply_text(f"hata oluştu. / an error occurred: {e}")
+        await update.message.reply_text(f"an error occurred: {e}.")
     finally:
         if os.path.exists(path): os.remove(path)
         if os.path.exists(photo_path): os.remove(photo_path)
 
-    await update.message.reply_text("işlem bitti. / process finished.")
+    await update.message.reply_text("process finished.")
     return ConversationHandler.END
 
 if __name__ == '__main__':
