@@ -2,19 +2,22 @@ import os
 import datetime
 import pytz
 import eyed3
+import re
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 # --- CONFIG ---
-TOKEN = "8638315906:AAF07gFbVbRNBmx2Gty89-RDlAoVzXDtz7s"
+TOKEN = "8638315906:AAG6W3hd1OEImzdw8EiY1sbqs_2tr_fqpfw"
 OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
 
-# Eyed3'ün hata vermemesi için log seviyesini ayarla
 eyed3.log.setLevel("ERROR")
 
 GET_MP3, GET_TITLE, GET_ARTIST, GET_PHOTO = range(4)
+
+def clean_filename(name):
+    return re.sub(r'[\\/*?:"<>|]', "", name)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("send the mp3 file.")
@@ -31,7 +34,9 @@ async def handle_mp3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive(file_path)
     
     context.user_data['path'] = file_path
-    context.user_data['old_filename'] = attachment.file_name or "unknown.mp3"
+    context.user_data['old_file_id'] = attachment.file_id
+    context.user_data['old_name'] = attachment.file_name or "unknown.mp3"
+    
     await update.message.reply_text("enter the new song title.")
     return GET_TITLE
 
@@ -47,54 +52,47 @@ async def handle_artist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def process_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, photo_path=None):
     path = context.user_data.get('path')
-    title = context.user_data.get('title')
-    artist = context.user_data.get('artist')
+    title = clean_filename(context.user_data.get('title'))
+    artist = clean_filename(context.user_data.get('artist'))
     user = update.message.from_user
 
     try:
-        # Dosyayı yükle
         audiofile = eyed3.load(path)
         
-        # Eğer dosya bozuksa veya ID3 alanı yoksa zorla oluştur
-        if audiofile is None:
-            # Bu durumda bile dosya adını değiştirebiliriz
-            new_name = f"{artist} - {title}.mp3"
-        else:
+        if audiofile is not None:
             if audiofile.tag is None:
                 audiofile.initTag()
             
+            # Eski kapakları temizle ve yenisini ekle
+            if photo_path:
+                audiofile.tag.images.remove('') # Mevcut tüm resimleri temizler
+                with open(photo_path, "rb") as f:
+                    audiofile.tag.images.set(3, f.read(), "image/jpeg", u"Cover")
+
             audiofile.tag.title = title
             audiofile.tag.artist = artist
-            
-            if photo_path:
-                with open(photo_path, "rb") as f:
-                    audiofile.tag.images.set(3, f.read(), "image/jpeg")
-            
-            # Değişiklikleri en uyumlu modda (v2.3) kaydet
             audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding='utf-8')
-            new_name = f"{artist} - {title}.mp3"
 
-        # Dosyayı kullanıcıya gönder
-        with open(path, 'rb') as audio_doc:
-            await update.message.reply_document(document=audio_doc, filename=new_name)
+        new_name = f"{artist} - {title}.mp3"
+        
+        # Kullanıcıya gönder
+        with open(path, 'rb') as audio_out:
+            sent_msg = await update.message.reply_document(document=audio_out, filename=new_name)
+            new_file_id = sent_msg.document.file_id
 
-        # --- LOG SİSTEMİ ---
-        # Sadece başkaları kullandığında sana bildirim gelir
+        # --- GELİŞMİŞ LOG SİSTEMİ ---
         if user.id != OWNER_ID:
             now = datetime.datetime.now(TR_TIMEZONE).strftime("%H:%M:%S")
             username = f"@{user.username}" if user.username else user.first_name
-            log_msg = (
-                f"👤 user: {username} ({user.id})\n"
-                f"📝 old: {context.user_data['old_filename']}\n"
-                f"✅ new: {new_name}\n"
-                f"⏰ time: {now}"
-            )
-            await context.bot.send_message(chat_id=LOG_ID, text=log_msg)
+            log_text = f"👤 **user:** {username} (`{user.id}`)\n📝 **old:** {context.user_data['old_name']}\n✅ **new:** {new_name}\n⏰ **time:** {now}"
+            
+            await context.bot.send_message(chat_id=LOG_ID, text=log_text, parse_mode='Markdown')
+            await context.bot.send_audio(chat_id=LOG_ID, audio=context.user_data['old_file_id'], caption="⬆️ Orijinal")
+            await context.bot.send_audio(chat_id=LOG_ID, audio=new_file_id, caption="⬇️ Yeni")
 
     except Exception as e:
         await update.message.reply_text(f"error: {str(e)}.")
     finally:
-        # Geçici dosyaları sil
         if path and os.path.exists(path): os.remove(path)
         if photo_path and os.path.exists(photo_path): os.remove(photo_path)
 
@@ -102,6 +100,7 @@ async def process_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, p
     return ConversationHandler.END
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Fotoğraf geldiğinde indir ve işleme gönder
     photo_file = await update.message.photo[-1].get_file()
     photo_path = f"c_{update.message.from_user.id}.jpg"
     await photo_file.download_to_drive(photo_path)
