@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 # --- CONFIG ---
-TOKEN = "8638315906:AAG6W3hd1OEImzdw8EiY1sbqs_2tr_fqpfw"
+TOKEN = "8638315906:AAFY1ykqIZuPKpfGzlef_EL5V__dUAHmeT0"
 OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
@@ -59,22 +59,23 @@ async def process_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, p
     try:
         audiofile = eyed3.load(path)
         
-        if audiofile is not None:
-            if audiofile.tag is None:
-                audiofile.initTag()
-            
-            # Eski kapakları temizle ve yenisini ekle
-            if photo_path:
-                audiofile.tag.images.remove('') # Mevcut tüm resimleri temizler
-                with open(photo_path, "rb") as f:
-                    audiofile.tag.images.set(3, f.read(), "image/jpeg", u"Cover")
-
-            audiofile.tag.title = title
-            audiofile.tag.artist = artist
-            audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding='utf-8')
-
-        new_name = f"{artist} - {title}.mp3"
+        # Kapak karmaşasını önlemek için tagleri sıfırla
+        if audiofile.tag:
+            audiofile.tag.clear() 
+        audiofile.initTag()
         
+        audiofile.tag.title = title
+        audiofile.tag.artist = artist
+        
+        if photo_path:
+            with open(photo_path, "rb") as f:
+                # 3 numaralı tip 'Front Cover' (Ön Kapak) demektir
+                audiofile.tag.images.set(3, f.read(), "image/jpeg", u"Cover")
+        
+        # Kaydet ve dosya ismini belirle
+        audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding='utf-8')
+        new_name = f"{artist} - {title}.mp3"
+
         # Kullanıcıya gönder
         with open(path, 'rb') as audio_out:
             sent_msg = await update.message.reply_document(document=audio_out, filename=new_name)
@@ -87,8 +88,8 @@ async def process_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, p
             log_text = f"👤 **user:** {username} (`{user.id}`)\n📝 **old:** {context.user_data['old_name']}\n✅ **new:** {new_name}\n⏰ **time:** {now}"
             
             await context.bot.send_message(chat_id=LOG_ID, text=log_text, parse_mode='Markdown')
-            await context.bot.send_audio(chat_id=LOG_ID, audio=context.user_data['old_file_id'], caption="⬆️ Orijinal")
-            await context.bot.send_audio(chat_id=LOG_ID, audio=new_file_id, caption="⬇️ Yeni")
+            await context.bot.send_audio(chat_id=LOG_ID, audio=context.user_data['old_file_id'], caption="⬆️ Orijinal Hal")
+            await context.bot.send_audio(chat_id=LOG_ID, audio=new_file_id, caption="⬇️ Botun Düzenlediği")
 
     except Exception as e:
         await update.message.reply_text(f"error: {str(e)}.")
@@ -100,7 +101,6 @@ async def process_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, p
     return ConversationHandler.END
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Fotoğraf geldiğinde indir ve işleme gönder
     photo_file = await update.message.photo[-1].get_file()
     photo_path = f"c_{update.message.from_user.id}.jpg"
     await photo_file.download_to_drive(photo_path)
@@ -110,6 +110,7 @@ async def skip_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await process_and_send(update, context)
 
 if __name__ == '__main__':
+    # Conflict hatasını minimize etmek için application'ı daha temiz kuruyoruz
     app = ApplicationBuilder().token(TOKEN).build()
     
     conv_handler = ConversationHandler(
@@ -124,7 +125,8 @@ if __name__ == '__main__':
             ],
         },
         fallbacks=[CommandHandler('start', start)],
+        allow_reentry=True
     )
     
     app.add_handler(conv_handler)
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True) # Eski istekleri temizleyerek başlar
