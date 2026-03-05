@@ -11,6 +11,9 @@ OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
 
+# Eyed3'ün hata vermemesi için log seviyesini ayarla
+eyed3.log.setLevel("ERROR")
+
 GET_MP3, GET_TITLE, GET_ARTIST, GET_PHOTO = range(4)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -28,7 +31,7 @@ async def handle_mp3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive(file_path)
     
     context.user_data['path'] = file_path
-    context.user_data['old'] = attachment.file_name or "unknown.mp3"
+    context.user_data['old_filename'] = attachment.file_name or "unknown.mp3"
     await update.message.reply_text("enter the new song title.")
     return GET_TITLE
 
@@ -42,67 +45,67 @@ async def handle_artist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("send the new cover photo or /skip.")
     return GET_PHOTO
 
-async def process_and_send(update, context, photo_path=None):
-    path = context.user_data['path']
-    title = context.user_data['title']
-    artist = context.user_data['artist']
+async def process_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, photo_path=None):
+    path = context.user_data.get('path')
+    title = context.user_data.get('title')
+    artist = context.user_data.get('artist')
+    user = update.message.from_user
 
     try:
         # Dosyayı yükle
         audiofile = eyed3.load(path)
         
-        # 'NoneType' hatasını önlemek için kontrol
+        # Eğer dosya bozuksa veya ID3 alanı yoksa zorla oluştur
         if audiofile is None:
-            raise ValueError("file format not supported or corrupted.")
+            # Bu durumda bile dosya adını değiştirebiliriz
+            new_name = f"{artist} - {title}.mp3"
+        else:
+            if audiofile.tag is None:
+                audiofile.initTag()
             
-        if audiofile.tag is None:
-            audiofile.initTag()
+            audiofile.tag.title = title
+            audiofile.tag.artist = artist
+            
+            if photo_path:
+                with open(photo_path, "rb") as f:
+                    audiofile.tag.images.set(3, f.read(), "image/jpeg")
+            
+            # Değişiklikleri en uyumlu modda (v2.3) kaydet
+            audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding='utf-8')
+            new_name = f"{artist} - {title}.mp3"
 
-        audiofile.tag.title = title
-        audiofile.tag.artist = artist
-        
-        if photo_path:
-            with open(photo_path, "rb") as f:
-                # Görseli ID3 standartlarına göre ekle
-                audiofile.tag.images.set(3, f.read(), "image/jpeg")
-        
-        # ID3 v2.3 en uyumlu sürümdür, ses verisine dokunmaz
-        audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
-        
-        new_name = f"{artist} - {title}.mp3"
-        await update.message.reply_document(document=open(path, 'rb'), filename=new_name)
-        
-        # Log system
-        user = update.message.from_user
+        # Dosyayı kullanıcıya gönder
+        with open(path, 'rb') as audio_doc:
+            await update.message.reply_document(document=audio_doc, filename=new_name)
+
+        # --- LOG SİSTEMİ ---
+        # Sadece başkaları kullandığında sana bildirim gelir
         if user.id != OWNER_ID:
             now = datetime.datetime.now(TR_TIMEZONE).strftime("%H:%M:%S")
-            mention = f"@{user.username}" if user.username else f"[{user.first_name}](tg://user?id={user.id})"
-            log = (f"log: {mention} ({user.id})\nold: {context.user_data['old']}\nnew: {new_name}\ntime: {now}")
-            await context.bot.send_message(chat_id=LOG_ID, text=log, parse_mode='Markdown')
+            username = f"@{user.username}" if user.username else user.first_name
+            log_msg = (
+                f"👤 user: {username} ({user.id})\n"
+                f"📝 old: {context.user_data['old_filename']}\n"
+                f"✅ new: {new_name}\n"
+                f"⏰ time: {now}"
+            )
+            await context.bot.send_message(chat_id=LOG_ID, text=log_msg)
 
     except Exception as e:
         await update.message.reply_text(f"error: {str(e)}.")
     finally:
-        # Temizlik
-        if os.path.exists(path): 
-            try: os.remove(path)
-            except: pass
-        if photo_path and os.path.exists(photo_path): 
-            try: os.remove(photo_path)
-            except: pass
+        # Geçici dosyaları sil
+        if path and os.path.exists(path): os.remove(path)
+        if photo_path and os.path.exists(photo_path): os.remove(photo_path)
 
     await update.message.reply_text("process finished.")
     return ConversationHandler.END
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        photo_file = await update.message.photo[-1].get_file()
-        photo_path = f"c_{update.message.from_user.id}.jpg"
-        await photo_file.download_to_drive(photo_path)
-        return await process_and_send(update, context, photo_path)
-    except:
-        await update.message.reply_text("photo error. skipping photo.")
-        return await process_and_send(update, context)
+    photo_file = await update.message.photo[-1].get_file()
+    photo_path = f"c_{update.message.from_user.id}.jpg"
+    await photo_file.download_to_drive(photo_path)
+    return await process_and_send(update, context, photo_path)
 
 async def skip_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await process_and_send(update, context)
