@@ -7,7 +7,7 @@ from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, APIC
 
 # --- SETTINGS ---
-TOKEN = "8676544410:AAHiCQiN3bf3AhvYMnC5arsNeU2cNIavj2k" # Yeni token eklendi
+TOKEN = "8676544410:AAEcKYZpw5dbLBgTGVZQFFac47PJ1IMt7H4" # Yeni token eklendi
 OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
