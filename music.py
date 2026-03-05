@@ -1,12 +1,12 @@
 import os
 import datetime
 import pytz
+import eyed3
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from mutagen.id3 import ID3, TIT2, TPE1, APIC, ID3NoHeaderError
 
 # --- CONFIG ---
-TOKEN = "8676544410:AAGgF6qqvK5ZDE3t_5XvAofUS7qCZAmUEuk"
+TOKEN = "8676544410:AAGxrs0hyFLBrUJLkSikDt-ovgq9o8PQSQ8"
 OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
@@ -48,20 +48,20 @@ async def process_and_send(update, context, photo_path=None):
     artist = context.user_data['artist']
 
     try:
-        # MP3 frame hatasını aşmak için doğrudan ID3 üzerinden işlem yapıyoruz
-        try:
-            tags = ID3(path)
-        except ID3NoHeaderError:
-            tags = ID3()
+        # eyed3 ile güvenli dosya yükleme
+        audiofile = eyed3.load(path)
+        if audiofile.tag is None:
+            audiofile.initTag()
 
-        tags.add(TIT2(encoding=3, text=title))
-        tags.add(TPE1(encoding=3, text=artist))
+        audiofile.tag.title = title
+        audiofile.tag.artist = artist
         
         if photo_path:
-            with open(photo_path, 'rb') as f:
-                tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=f.read()))
+            with open(photo_path, "rb") as f:
+                audiofile.tag.images.set(3, f.read(), "image/jpeg")
         
-        tags.save(path)
+        # Sadece tagleri kaydeder, ses verisini bozmaz
+        audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
         
         new_name = f"{artist} - {title}.mp3"
         await update.message.reply_document(document=open(path, 'rb'), filename=new_name)
