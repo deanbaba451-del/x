@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 # --- CONFIG ---
-TOKEN = "8638315906:AAGGSddzlLzxd6bp1NSZ8JfqDtkpUZRUwqg"
+TOKEN = "8638315906:AAF07gFbVbRNBmx2Gty89-RDlAoVzXDtz7s"
 OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
