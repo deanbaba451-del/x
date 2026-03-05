@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 # --- CONFIG ---
-TOKEN = "8676544410:AAGxrs0hyFLBrUJLkSikDt-ovgq9o8PQSQ8"
+TOKEN = "8638315906:AAGGSddzlLzxd6bp1NSZ8JfqDtkpUZRUwqg"
 OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
@@ -48,8 +48,13 @@ async def process_and_send(update, context, photo_path=None):
     artist = context.user_data['artist']
 
     try:
-        # eyed3 ile güvenli dosya yükleme
+        # Dosyayı yükle
         audiofile = eyed3.load(path)
+        
+        # 'NoneType' hatasını önlemek için kontrol
+        if audiofile is None:
+            raise ValueError("file format not supported or corrupted.")
+            
         if audiofile.tag is None:
             audiofile.initTag()
 
@@ -58,9 +63,10 @@ async def process_and_send(update, context, photo_path=None):
         
         if photo_path:
             with open(photo_path, "rb") as f:
+                # Görseli ID3 standartlarına göre ekle
                 audiofile.tag.images.set(3, f.read(), "image/jpeg")
         
-        # Sadece tagleri kaydeder, ses verisini bozmaz
+        # ID3 v2.3 en uyumlu sürümdür, ses verisine dokunmaz
         audiofile.tag.save(version=eyed3.id3.ID3_V2_3)
         
         new_name = f"{artist} - {title}.mp3"
@@ -77,17 +83,26 @@ async def process_and_send(update, context, photo_path=None):
     except Exception as e:
         await update.message.reply_text(f"error: {str(e)}.")
     finally:
-        if os.path.exists(path): os.remove(path)
-        if photo_path and os.path.exists(photo_path): os.remove(photo_path)
+        # Temizlik
+        if os.path.exists(path): 
+            try: os.remove(path)
+            except: pass
+        if photo_path and os.path.exists(photo_path): 
+            try: os.remove(photo_path)
+            except: pass
 
     await update.message.reply_text("process finished.")
     return ConversationHandler.END
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_file = await update.message.photo[-1].get_file()
-    photo_path = f"c_{update.message.from_user.id}.jpg"
-    await photo_file.download_to_drive(photo_path)
-    return await process_and_send(update, context, photo_path)
+    try:
+        photo_file = await update.message.photo[-1].get_file()
+        photo_path = f"c_{update.message.from_user.id}.jpg"
+        await photo_file.download_to_drive(photo_path)
+        return await process_and_send(update, context, photo_path)
+    except:
+        await update.message.reply_text("photo error. skipping photo.")
+        return await process_and_send(update, context)
 
 async def skip_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await process_and_send(update, context)
