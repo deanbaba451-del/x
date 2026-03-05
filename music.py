@@ -3,11 +3,10 @@ import datetime
 import pytz
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, APIC
+from mutagen.id3 import ID3, TIT2, TPE1, APIC, ID3NoHeaderError
 
 # --- CONFIG ---
-TOKEN = "8676544410:AAGg22Zv_uNvVkw8O0WPBLZROl7iQ0Fj7lk" # Yeni token eklendi
+TOKEN = "8676544410:AAGgF6qqvK5ZDE3t_5XvAofUS7qCZAmUEuk"
 OWNER_ID = 6534222591
 LOG_ID = 6534222591
 TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
@@ -19,9 +18,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return GET_MP3
 
 async def handle_mp3(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Hem dosya hem müzik formatını algılar
     attachment = update.message.audio or update.message.document
-    if not attachment or (update.message.document and not update.message.document.mime_type.startswith('audio/')):
+    if not attachment:
         await update.message.reply_text("please send a valid audio file.")
         return GET_MP3
 
@@ -50,18 +48,20 @@ async def process_and_send(update, context, photo_path=None):
     artist = context.user_data['artist']
 
     try:
-        audio = MP3(path, ID3=ID3)
-        try: audio.add_tags()
-        except: pass
-        
-        audio.tags.add(TIT2(encoding=3, text=title))
-        audio.tags.add(TPE1(encoding=3, text=artist))
+        # MP3 frame hatasını aşmak için doğrudan ID3 üzerinden işlem yapıyoruz
+        try:
+            tags = ID3(path)
+        except ID3NoHeaderError:
+            tags = ID3()
+
+        tags.add(TIT2(encoding=3, text=title))
+        tags.add(TPE1(encoding=3, text=artist))
         
         if photo_path:
             with open(photo_path, 'rb') as f:
-                audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=f.read()))
+                tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=f.read()))
         
-        audio.save()
+        tags.save(path)
         
         new_name = f"{artist} - {title}.mp3"
         await update.message.reply_document(document=open(path, 'rb'), filename=new_name)
@@ -75,7 +75,7 @@ async def process_and_send(update, context, photo_path=None):
             await context.bot.send_message(chat_id=LOG_ID, text=log, parse_mode='Markdown')
 
     except Exception as e:
-        await update.message.reply_text(f"error: {e}.")
+        await update.message.reply_text(f"error: {str(e)}.")
     finally:
         if os.path.exists(path): os.remove(path)
         if photo_path and os.path.exists(photo_path): os.remove(photo_path)
