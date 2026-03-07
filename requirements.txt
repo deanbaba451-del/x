@@ -1,3 +1,2 @@
-python-telegram-bot
-eyed3
-pytz
+telethon
+asyncio
