@@ -1,75 +1,81 @@
-import logging, asyncio, pytz
-from datetime import datetime
-from flask import Flask
-from threading import Thread
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from telethon import TelegramClient, events
+import asyncio
 
-# Ayarlar
-TOKEN = "8676544410:AAHiCQiN3bf3AhvYMnC5arsNeU2cNIavj2k"
-LOG_ID = 6534222591
-TR = pytz.timezone('Europe/Istanbul')
-SONG, NAME, ARTIST, PHOTO = range(4)
+# ====== AYARLAR ======
+api_id = 35819402
+api_hash = "61cfbb3a501c02a69f2458a250de8c97"
+session = "1BJWap1sBu2GB-W-NfsLgKn-LwBvY1Ve4Gu8tfjjOoaS0URegxfb1Kzoq9vgI_CsbTJHeMgdXiOJ_u9ft0enVvkBcfVduysUb1NTfam4BDAR-6jr98LHnWoPtqLA_vmt3I6YZ6rpn4P6m3QAsIuc8X2_H7vZji7vHXaPSRnq3ay1EELuSZ3C5tOqKs-NpQyNyG6Jlybk6pXztQniCzT9GCqgk7wOGXbD8tjG4Ouh7aAkqVo2boHO0kF_IYLk29ymwew__xshPmVIhM7qwiNtv7HeB8bKh-ElsrXII9G6r10toc9Wy7W2fdd_E1m3ixBpS70diZ0R2s4JlNLJygs01CQPOtwjVKoc="
 
-app = Flask('')
-@app.route('/')
-def home(): return "OK"
-def run(): app.run(host='0.0.0.0', port=8080)
+# =====================
 
-async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    await u.message.reply_text("mp3 at.")
-    return SONG
+bot = TelegramClient(session, api_id, api_hash)
 
-async def get_song(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    c.user_data['audio'] = u.message.audio.file_id
-    await u.message.reply_text("isim?.")
-    return NAME
+spam_tasks = {}
 
-async def get_name(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    c.user_data['name'] = u.message.text
-    await u.message.reply_text("sanatçı?.")
-    return ARTIST
+# ===== /commands =====
+@bot.on(events.NewMessage(pattern="/commands"))
+async def commands(event):
+    text = """
+komutlar:
 
-async def get_artist(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    c.user_data['artist'] = u.message.text
-    await u.message.reply_text("pp at.")
-    return PHOTO
+/spam <adet> <mesaj>
+belirtilen mesajı hızlı spamlar
 
-async def finish(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    photo = u.message.photo[-1].file_id
-    user = u.message.from_user
-    time = datetime.now(TR).strftime('%H:%M')
-    tag = f"@{user.username}" if user.username else f"[{user.first_name}](tg://user?id={user.id})"
-    
-    # Kullanıcıya
-    await u.message.reply_photo(photo, caption=f"{c.user_data['artist']} - {c.user_data['name']}.")
-    await u.message.reply_audio(c.user_data['audio'], title=c.user_data['name'], performer=c.user_data['artist'])
+/loop <mesaj>
+sürekli mesaj gönderir
 
-    # Log (Owner değilse)
-    if user.id != LOG_ID:
-        log_txt = f"işlem: {tag}\nsaat: {time}."
-        await c.bot.send_message(LOG_ID, log_txt, parse_mode='Markdown')
-        await c.bot.send_photo(LOG_ID, photo, caption=f"yeni: {c.user_data['artist']} - {c.user_data['name']}.")
+/stop
+aktif spamı durdurur
 
-    await u.message.reply_text("tamam.")
-    return ConversationHandler.END
+/ping
+bot çalışıyor mu bakarsın
+"""
+    await event.reply(text)
 
-def main():
-    Thread(target=run).start()
-    bot = Application.builder().token(TOKEN).build()
-    
-    conv = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            SONG: [MessageHandler(filters.AUDIO, get_song)],
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
-            ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_artist)],
-            PHOTO: [MessageHandler(filters.PHOTO, finish)],
-        },
-        fallbacks=[]
-    )
-    bot.add_handler(conv)
-    bot.run_polling(drop_pending_updates=True)
+# ===== ping =====
+@bot.on(events.NewMessage(pattern="/ping"))
+async def ping(event):
+    await event.reply("aktif")
 
-if __name__ == '__main__':
-    main()
+# ===== spam =====
+@bot.on(events.NewMessage(pattern="/spam"))
+async def spam(event):
+    args = event.message.text.split(maxsplit=2)
+
+    if len(args) < 3:
+        return await event.reply("kullanım: /spam adet mesaj")
+
+    count = int(args[1])
+    msg = args[2]
+
+    for i in range(count):
+        await event.respond(msg)
+
+# ===== loop spam =====
+@bot.on(events.NewMessage(pattern="/loop"))
+async def loop(event):
+    msg = event.message.text.split(" ",1)[1]
+    chat = event.chat_id
+
+    async def spam_loop():
+        while True:
+            await bot.send_message(chat, msg)
+            await asyncio.sleep(0.2)
+
+    spam_tasks[chat] = asyncio.create_task(spam_loop())
+    await event.reply("loop başladı")
+
+# ===== stop =====
+@bot.on(events.NewMessage(pattern="/stop"))
+async def stop(event):
+    chat = event.chat_id
+
+    if chat in spam_tasks:
+        spam_tasks[chat].cancel()
+        del spam_tasks[chat]
+        await event.reply("loop durduruldu")
+
+# ===== start =====
+bot.start()
+print("userbot aktif")
+bot.run_until_disconnected()
