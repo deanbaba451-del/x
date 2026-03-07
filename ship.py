@@ -1,9 +1,9 @@
 import asyncio
 from telethon import TelegramClient, events
 
-api_id = 123456
-api_hash = "API_HASH"
-session = "STRING_SESSION"
+api_id = 35819402
+api_hash = "61cfbb3a501c02a69f2458a250de8c97"
+session = "1BJWap1sBu2GB-W-NfsLgKn-LwBvY1Ve4Gu8tfjjOoaS0URegxfb1Kzoq9vgI_CsbTJHeMgdXiOJ_u9ft0enVvkBcfVduysUb1NTfam4BDAR-6jr98LHnWoPtqLA_vmt3I6YZ6rpn4P6m3QAsIuc8X2_H7vZji7vHXaPSRnq3ay1EELuSZ3C5tOqKs-NpQyNyG6Jlybk6pXztQniCzT9GCqgk7wOGXbD8tjG4Ouh7aAkqVo2boHO0kF_IYLk29ymwew__xshPmVIhM7qwiNtv7HeB8bKh-ElsrXII9G6r10toc9Wy7W2fdd_E1m3ixBpS70diZ0R2s4JlNLJygs01CQPOtwjVKoc="
 
 bot = TelegramClient(session, api_id, api_hash)
 
