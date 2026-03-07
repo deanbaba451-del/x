@@ -1,132 +1,60 @@
-import os
-import datetime
-import pytz
-import eyed3
-import re
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+import os, re, asyncio, sys
+from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
 
-# --- CONFIG ---
-TOKEN = "8638315906:AAFY1ykqIZuPKpfGzlef_EL5V__dUAHmeT0"
-OWNER_ID = 6534222591
-LOG_ID = 6534222591
-TR_TIMEZONE = pytz.timezone('Europe/Istanbul')
+# Python 3.14 Loop Fix
+try:
+    loop = asyncio.get_event_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-eyed3.log.setLevel("ERROR")
+API_ID = 36856573
+API_HASH = "9045fafb55bc4aa6fa2aadafbb1f2e1e"
+# BURAYA COLAB'DAN ALDIĞIN YENİ VE SAĞLAM STRING'I YAPIŞTIR
+STRING_SESSION = "YENI_ALINAN_STRING_BURAYA"
 
-GET_MP3, GET_TITLE, GET_ARTIST, GET_PHOTO = range(4)
+OWNERS = [6534222591, 8256872080, 8343507331]
+app = Client("my_bot", session_string=STRING_SESSION, api_id=API_ID, api_hash=API_HASH, in_memory=True)
 
-def clean_filename(name):
-    return re.sub(r'[\\/*?:"<>|]', "", name)
+@app.on_message(filters.group & ~filters.user(OWNERS))
+async def auto_del(_, msg):
+    if msg.text and re.search(r"(\+?\d{1,3}[- ]?)?\d{10,12}", msg.text):
+        try: await msg.delete()
+        except: pass
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("send the mp3 file.")
-    return GET_MP3
+@app.on_message(filters.command("doedaseks", "/") & filters.user(OWNERS))
+async def full_clean(_, msg):
+    await msg.delete()
+    async for m in app.get_chat_history(msg.chat.id):
+        try: 
+            await m.delete()
+            await asyncio.sleep(0.2)
+        except FloodWait as e: await asyncio.sleep(e.value)
+        except: continue
 
-async def handle_mp3(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    attachment = update.message.audio or update.message.document
-    if not attachment:
-        await update.message.reply_text("please send a valid audio file.")
-        return GET_MP3
+@app.on_message(filters.command("gayeda", "/") & filters.user(OWNERS))
+async def media_clean(_, msg):
+    await msg.delete()
+    async for m in app.get_chat_history(msg.chat.id):
+        if not (m.text or m.voice or m.audio):
+            try: 
+                await m.delete()
+                await asyncio.sleep(0.2)
+            except FloodWait as e: await asyncio.sleep(e.value)
+            except: continue
 
-    file = await attachment.get_file()
-    file_path = f"t_{update.message.from_user.id}.mp3"
-    await file.download_to_drive(file_path)
-    
-    context.user_data['path'] = file_path
-    context.user_data['old_file_id'] = attachment.file_id
-    context.user_data['old_name'] = attachment.file_name or "unknown.mp3"
-    
-    await update.message.reply_text("enter the new song title.")
-    return GET_TITLE
+@app.on_message(filters.command("durdu", "/") & filters.user(OWNERS))
+async def stop_bot(_, msg):
+    await msg.delete()
+    await app.stop()
+    os._exit(0)
 
-async def handle_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['title'] = update.message.text
-    await update.message.reply_text("enter the new artist name.")
-    return GET_ARTIST
+async def start_bot():
+    print("Bot başlatılıyor...")
+    await app.start()
+    print("Userbot AKTİF!")
+    await asyncio.Event().wait()
 
-async def handle_artist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['artist'] = update.message.text
-    await update.message.reply_text("send the new cover photo or /skip.")
-    return GET_PHOTO
-
-async def process_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, photo_path=None):
-    path = context.user_data.get('path')
-    title = clean_filename(context.user_data.get('title'))
-    artist = clean_filename(context.user_data.get('artist'))
-    user = update.message.from_user
-
-    try:
-        audiofile = eyed3.load(path)
-        
-        # Kapak karmaşasını önlemek için tagleri sıfırla
-        if audiofile.tag:
-            audiofile.tag.clear() 
-        audiofile.initTag()
-        
-        audiofile.tag.title = title
-        audiofile.tag.artist = artist
-        
-        if photo_path:
-            with open(photo_path, "rb") as f:
-                # 3 numaralı tip 'Front Cover' (Ön Kapak) demektir
-                audiofile.tag.images.set(3, f.read(), "image/jpeg", u"Cover")
-        
-        # Kaydet ve dosya ismini belirle
-        audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding='utf-8')
-        new_name = f"{artist} - {title}.mp3"
-
-        # Kullanıcıya gönder
-        with open(path, 'rb') as audio_out:
-            sent_msg = await update.message.reply_document(document=audio_out, filename=new_name)
-            new_file_id = sent_msg.document.file_id
-
-        # --- GELİŞMİŞ LOG SİSTEMİ ---
-        if user.id != OWNER_ID:
-            now = datetime.datetime.now(TR_TIMEZONE).strftime("%H:%M:%S")
-            username = f"@{user.username}" if user.username else user.first_name
-            log_text = f"👤 **user:** {username} (`{user.id}`)\n📝 **old:** {context.user_data['old_name']}\n✅ **new:** {new_name}\n⏰ **time:** {now}"
-            
-            await context.bot.send_message(chat_id=LOG_ID, text=log_text, parse_mode='Markdown')
-            await context.bot.send_audio(chat_id=LOG_ID, audio=context.user_data['old_file_id'], caption="⬆️ Orijinal Hal")
-            await context.bot.send_audio(chat_id=LOG_ID, audio=new_file_id, caption="⬇️ Botun Düzenlediği")
-
-    except Exception as e:
-        await update.message.reply_text(f"error: {str(e)}.")
-    finally:
-        if path and os.path.exists(path): os.remove(path)
-        if photo_path and os.path.exists(photo_path): os.remove(photo_path)
-
-    await update.message.reply_text("process finished.")
-    return ConversationHandler.END
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_file = await update.message.photo[-1].get_file()
-    photo_path = f"c_{update.message.from_user.id}.jpg"
-    await photo_file.download_to_drive(photo_path)
-    return await process_and_send(update, context, photo_path)
-
-async def skip_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await process_and_send(update, context)
-
-if __name__ == '__main__':
-    # Conflict hatasını minimize etmek için application'ı daha temiz kuruyoruz
-    app = ApplicationBuilder().token(TOKEN).build()
-    
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start), MessageHandler(filters.AUDIO | filters.Document.ALL, handle_mp3)],
-        states={
-            GET_MP3: [MessageHandler(filters.AUDIO | filters.Document.ALL, handle_mp3)],
-            GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_title)],
-            GET_ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_artist)],
-            GET_PHOTO: [
-                MessageHandler(filters.PHOTO, handle_photo),
-                CommandHandler('skip', skip_photo)
-            ],
-        },
-        fallbacks=[CommandHandler('start', start)],
-        allow_reentry=True
-    )
-    
-    app.add_handler(conv_handler)
-    app.run_polling(drop_pending_updates=True) # Eski istekleri temizleyerek başlar
+if __name__ == "__main__":
+    loop.run_until_complete(start_bot())
