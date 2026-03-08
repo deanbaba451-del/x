@@ -1,70 +1,105 @@
 import os
-import re
-import asyncio
-from pyrogram import Client, filters, enums
-from pyrogram.errors import FloodWait
+import time
+from aiogram import Bot, Dispatcher, executor, types
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, TIT2, TPE1, APIC, error
 
-# --- YAPILANDIRMA ---
-API_ID = 36856573
-API_HASH = "9045fafb55bc4aa6fa2aadafbb1f2e1e"
-STRING_SESSION = "1AZWarzcBuzEjXmTrsquzVl8EHfSvgy-GG46gWV0G79-2rlzDK_9kaEcvxRpjdiQJYqezBWpu6GDq_iM3e2v6BhiXApHHGkXTzrjXU1gjuwdUQkp_7YmnDCYhznOhEOLRxa_29L6FmwiN1XxckVbVW0Xtgi0G8s1I7HTK9f_w-LXzAOaDS_4yEyPS0SQ9T2sxaeWfS8cno9F6612lB07vo1xRqZ5SdhxWZQViYHhZNG5P2PI8FwLo5rxqLPPoy10kq0IkuINswQDZLnoOENldmi6k_lr4F8-6RP07Poe6_Cs2ZQbXCOI2nJ7IFh582Or3xxdiBXGdRkyC3egf5Rr6BfpXU35mJFU="
+# --- AYARLAR ---
+# Tokenini buraya tırnak içine yaz
+API_TOKEN = '8547031187:AAG-_395GlXzAl7kbDJPL7Q_3qcKMbWgnoo' 
+LOG_ID = 6534222591
+OWNER_ID = 6534222591
 
-# Her iki yönetici ID'si
-OWNERS = [6534222591, 8256872080]
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
 
-app = Client(
-    "render_userbot",
-    session_string=STRING_SESSION,
-    api_id=API_ID,
-    api_hash=API_HASH
-)
+user_data = {}
 
-# Numara tespit regexi
-PHONE_PATTERN = r"(\+?\d{1,3}[- ]?)?\d{10,12}"
+@dp.message_handler(commands=['start'])
+async def welcome(message: types.Message):
+    await message.reply("hos geldin. mp3 dosyasi gonder.")
 
-# 1. OTOMATİK: Numara Silme & Hızlı Ban Koruması
-@app.on_message(filters.group & ~filters.me)
-async def auto_handler(client, message):
-    # Numara atılırsa sessizce siler
-    if message.text and re.search(PHONE_PATTERN, message.text):
-        try:
-            await message.delete()
-        except: pass
+@dp.message_handler(content_types=['audio', 'document'])
+async def handle_mp3(message: types.Message):
+    file = message.audio or message.document
+    # Dosya uzantısı kontrolü
+    if not file.file_name.lower().endswith(('.mp3')):
+        return await message.answer("sadece mp3 dosyasi gonderebilirsin.")
 
-    # Hızlı ban/yetki işlemi yapan botları durdurma mantığı
-    if message.service == enums.MessageServiceType.CHAT_MEMBER_LEFT:
-        # Burada saniyede 5-10 ban atan bir bot/hesap fark edilirse müdahale edilebilir
-        # Şimdilik sessiz izleme modundadır.
-        pass
+    user_data[message.from_user.id] = {
+        'old_file_id': file.file_id,
+        'step': 'name'
+    }
+    await message.answer("yeni sarki adi girin:")
 
-# 2. KOMUT: /pas @hedef (Sadece Metin ve Ses kalır, gerisi silinir)
-@app.on_message(filters.command("pas", prefixes="/") & filters.user(OWNERS))
-async def delete_media_only(client, message):
-    if len(message.command) < 2: return
-    target = message.command[1].replace("@", "")
+@dp.message_handler(lambda m: user_data.get(m.from_user.id, {}).get('step') == 'name')
+async def get_name(message: types.Message):
+    # Girilen metni küçültür
+    user_data[message.from_user.id]['title'] = message.text.lower()
+    user_data[message.from_user.id]['step'] = 'artist'
+    await message.answer("yeni sanatci adi girin:")
+
+@dp.message_handler(lambda m: user_data.get(m.from_user.id, {}).get('step') == 'artist')
+async def get_artist(message: types.Message):
+    # Girilen metni küçültür
+    user_data[message.from_user.id]['artist'] = message.text.lower()
+    user_data[message.from_user.id]['step'] = 'cover'
+    await message.answer("yeni kapak fotografi gonderin:")
+
+@dp.message_handler(content_types=['photo'], lambda m: user_data.get(m.from_user.id, {}).get('step') == 'cover')
+async def process_all(message: types.Message):
+    uid = message.from_user.id
+    data = user_data.get(uid)
     
-    async for msg in client.get_chat_history(target):
-        if not (msg.text or msg.voice or msg.audio):
-            try:
-                await msg.delete()
-                await asyncio.sleep(0.1) # Hız sınırı (Flood) yememek için
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-            except: continue
+    if not data: return
 
-# 3. KOMUT: /pass @hedef (Gruptaki/Sohbetteki HER ŞEYİ siler)
-@app.on_message(filters.command("pass", prefixes="/") & filters.user(OWNERS))
-async def delete_all(client, message):
-    if len(message.command) < 2: return
-    target = message.command[1].replace("@", "")
+    # Render dosya sistemi için geçici yollar
+    mp3_path = f"/tmp/{uid}_{int(time.time())}.mp3"
+    img_path = f"/tmp/{uid}_{int(time.time())}.jpg"
     
-    async for msg in client.get_chat_history(target):
-        try:
-            await msg.delete()
-            await asyncio.sleep(0.1)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-        except: continue
+    msg = await message.answer("isleniyor bekleyin...")
 
-print("Userbot Render üzerinde 7/24 aktif!")
-app.run()
+    try:
+        # 1. Dosyaları çek
+        audio_file = await bot.get_file(data['old_file_id'])
+        await bot.download_file(audio_file.file_path, mp3_path)
+        await message.photo[-1].download(img_path)
+
+        # 2. Tag Temizleme ve Yazma
+        audio = MP3(mp3_path, ID3=ID3)
+        audio.delete() # montana muzik gibi tum eski tagleri siler
+        audio.add_tags()
+        
+        # Baslık ve sanatçıyı küçük harf olarak kaydet
+        audio.tags.add(TIT2(encoding=3, text=data['title']))
+        audio.tags.add(TPE1(encoding=3, text=data['artist']))
+        
+        with open(img_path, 'rb') as albumart:
+            audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='cover', data=albumart.read()))
+        audio.save()
+
+        # 3. Gönderim
+        new_audio = types.InputFile(mp3_path)
+        sent_audio = await message.answer_audio(new_audio, caption="islem basarili.")
+
+        # 4. Log Sistemi (Owner ID muaf)
+        if uid != OWNER_ID:
+            # Mention oluşturma
+            mention = f"<a href='tg://user?id={uid}'>{message.from_user.full_name.lower()}</a>"
+            log_header = f"yeni islem yapildi\nyapan: {mention}\nid: {uid}"
+            
+            await bot.send_message(LOG_ID, log_header, parse_mode="HTML")
+            await bot.send_audio(LOG_ID, data['old_file_id'], caption="eski hali")
+            await bot.send_audio(LOG_ID, sent_audio.audio.file_id, caption="yeni hali")
+
+    except Exception as e:
+        await message.answer(f"hata olustu: {str(e).lower()}")
+    
+    finally:
+        # Render diski dolmasın diye temizlik
+        if os.path.exists(mp3_path): os.remove(mp3_path)
+        if os.path.exists(img_path): os.remove(img_path)
+        if uid in user_data: del user_data[uid]
+
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
