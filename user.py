@@ -2,7 +2,6 @@ import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-# Render loglarını takip etmek için
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -14,23 +13,28 @@ async def deleted_edited_message(update: Update, context: ContextTypes.DEFAULT_T
     # Editlenen mesaj objesini al
     message = update.edited_message
     
-    # EĞER: Mesaj içeriği yoksa (sadece emoji/tepki gelmişse) işlemi durdur
+    # 1. KONTROL: Eğer mesaj objesi boşsa veya metin içermiyorsa (örneğin sadece emoji tepkisiyse) DUR.
     if not message or not message.text:
         return
 
-    # EĞER: Mesajın düzenlenme zamanı yoksa (bazı tepkilerde tetiklenmemesi için güvenlik)
+    # 2. KONTROL: Mesajın ilk yazılma zamanı ile editlenme zamanı aynı mı? 
+    # Tepki bırakıldığında bazen bu değerler manipüle olabiliyor.
+    # Ayrıca edit_date yoksa bu gerçek bir edit değildir.
     if not message.edit_date:
         return
 
+    # 3. KONTROL: Sadece metin mesajlarını hedef al (Medya altı yazılarını korumak istersen burası önemli)
+    # Eğer tepki bırakılıyorsa Telegram genellikle 'text' alanında bir değişiklik yapmaz.
+    
     user = message.from_user
     chat_id = message.chat_id
     
     try:
-        # 1. Editlenen mesajı sil
+        # Mesajı sil
         await message.delete()
         
-        # 2. Kullanıcıyı mention atarak uyar
-        mention = user.mention_html()
+        # Kullanıcıya mention at
+        mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
         warning_text = f"{mention}, your edited message has been deleted."
         
         await context.bot.send_message(
@@ -38,19 +42,19 @@ async def deleted_edited_message(update: Update, context: ContextTypes.DEFAULT_T
             text=warning_text,
             parse_mode='HTML'
         )
-        logging.info(f"Başarılı: {user.full_name} kullanıcısının editi silindi.")
+        logging.info(f"Edit silindi: {user.id}")
         
     except Exception as e:
-        logging.error(f"Mesaj silinirken hata: {e}")
+        logging.error(f"Hata: {e}")
 
 if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
     
-    # Filters.UpdateType.EDITED_MESSAGE kullanarak sadece düzenlenen mesajları yakalıyoruz
-    # filters.TEXT ekleyerek tepki (reaction) güncellemelerini büyük oranda eliyoruz
+    # filters.UpdateType.EDITED_MESSAGE -> Sadece editleri yakalar
+    # filters.TEXT -> İçinde metin olanları yakalar (Tepkileri eler)
     edit_handler = MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.TEXT, deleted_edited_message)
     
     application.add_handler(edit_handler)
     
-    print("Bot Render üzerinde çalışmaya hazır...")
+    print("Bot yayında, tepki/edit ayrımı aktif.")
     application.run_polling()
