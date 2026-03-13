@@ -1,60 +1,72 @@
 import logging
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
+# Loglama (Render panelinde hataları görmek için)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-TOKEN = "8445071969:AAGyGSMkm_FR4T041RVokhVZDxS5ciyw6Dg"
+# YENİ TOKEN
+TOKEN = "8445071969:AAFjTl-k6tidEDTCvF6IIvr7BMnkML1cq5Q"
 
-async def deleted_edited_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Editlenen mesaj objesini al
-    message = update.edited_message
-    
-    # 1. KONTROL: Eğer mesaj objesi boşsa veya metin içermiyorsa (örneğin sadece emoji tepkisiyse) DUR.
-    if not message or not message.text:
-        return
-
-    # 2. KONTROL: Mesajın ilk yazılma zamanı ile editlenme zamanı aynı mı? 
-    # Tepki bırakıldığında bazen bu değerler manipüle olabiliyor.
-    # Ayrıca edit_date yoksa bu gerçek bir edit değildir.
-    if not message.edit_date:
-        return
-
-    # 3. KONTROL: Sadece metin mesajlarını hedef al (Medya altı yazılarını korumak istersen burası önemli)
-    # Eğer tepki bırakılıyorsa Telegram genellikle 'text' alanında bir değişiklik yapmaz.
-    
-    user = message.from_user
-    chat_id = message.chat_id
-    
+async def delete_warning(context, chat_id, message_id):
+    """Uyarı mesajını 60 saniye sonra siler."""
+    await asyncio.sleep(60)
     try:
-        # Mesajı sil
-        await message.delete()
-        
-        # Kullanıcıya mention at
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except:
+        pass
+
+async def handle_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Editlenen mesajı yakala
+    msg = update.edited_message
+    
+    # --- HASSASİYET FİLTRELERİ ---
+    # 1. Mesaj objesi yoksa veya metin içermiyorsa (sadece tepki/emoji ise) DUR.
+    if not msg or not msg.text:
+        return
+
+    # 2. Eğer mesajın düzenlenme tarihi yoksa bu teknik olarak bir 'edit' değildir, DUR.
+    if not msg.edit_date:
+        return
+
+    # 3. Mesajın editlenme zamanı ile gönderilme zamanı aynıysa (bazı tepki bugları için) DUR.
+    if msg.date == msg.edit_date:
+        return
+    # ----------------------------
+
+    user = msg.from_user
+    chat_id = msg.chat_id
+
+    try:
+        # Editlenen mesajı sil
+        await msg.delete()
+
+        # Mention at ve uyarı gönder
         mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
-        warning_text = f"{mention}, your edited message has been deleted."
+        text = f"{mention}, your edited message has been deleted."
         
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=warning_text,
+        sent_msg = await context.bot.send_message(
+            chat_id=chat_id, 
+            text=text, 
             parse_mode='HTML'
         )
-        logging.info(f"Edit silindi: {user.id}")
-        
+
+        # 60 saniye sonra uyarıyı silmek için görev başlat
+        asyncio.create_task(delete_warning(context, chat_id, sent_msg.message_id))
+
     except Exception as e:
         logging.error(f"Hata: {e}")
 
 if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
-    
-    # filters.UpdateType.EDITED_MESSAGE -> Sadece editleri yakalar
-    # filters.TEXT -> İçinde metin olanları yakalar (Tepkileri eler)
-    edit_handler = MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.TEXT, deleted_edited_message)
-    
-    application.add_handler(edit_handler)
-    
-    print("Bot yayında, tepki/edit ayrımı aktif.")
+
+    # Filtre: Sadece editlenmiş ve metin içeren mesajlar
+    edit_filter = filters.UpdateType.EDITED_MESSAGE & filters.TEXT
+    application.add_handler(MessageHandler(edit_filter, handle_edit))
+
+    print("Bot aktif! Tepkileri görmezden gelir, editleri siler.")
     application.run_polling()
