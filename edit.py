@@ -5,6 +5,7 @@ from pyrogram.types import Message
 from flask import Flask
 from threading import Thread
 
+# --- Flask Ayarları ---
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -12,28 +13,23 @@ def home():
     return "Bot aktif."
 
 def run_web():
+    # Render genellikle 10000 portunu kullanır
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host='0.0.0.0', port=port)
 
+# --- Bot Bilgileri ---
 API_ID = 20275001
 API_HASH = "26e474f4a17fe5b306cc6ecfd2a1ed55"
 BOT_TOKEN = "8579539233:AAGX9Dd0hTGV2_yhBbyzr7n7xbBMym7152Y"
 SESSION_STRING = "BAE1XzkAQODlnE7Q5p49txSKPSdxVCdBv4ZnzUE1TGF9OGngoeZSgUoNg9AXyPbRMgmDsQ0hoyv9fVy8JnEu0SUs6DkcQ5i6GqNlQnfXM3pbMr4JNx8KilGKWgUcoU8FQm5EiWRQVTL-1xXGx1TxkoR_UYXeycIqvL4uVwvDSAVRaRCbwKgafBL49WPXoWq0HVpP46YBlT0ocjTeHIOUBKtnoAGQMQL079ok91BSbMOH0GXritBykHeCispbLyzRNt4KmSpLZlEKzkxlicYTvdDaPOzvmZRnnIUoASoi2YSCwe4Le0sR0YZ-P_5GvN-vm8CdmWa947-_ZSVxuCvGSXniz8yeFQAAAAHfRBiOAA"
 
-if SESSION_STRING:
-    app = Client(
-        "guard_bot",
-        api_id=API_ID,
-        api_hash=API_HASH,
-        session_string=SESSION_STRING
-    )
-else:
-    app = Client(
-        "guard_bot",
-        api_id=API_ID,
-        api_hash=API_HASH,
-        bot_token=BOT_TOKEN
-    )
+app = Client(
+    "guard_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN if not SESSION_STRING else None,
+    session_string=SESSION_STRING if SESSION_STRING else None
+)
 
 CHAT_SETTINGS = {}
 message_store = {}
@@ -55,25 +51,24 @@ def get_content_fingerprint(message: Message):
 async def toggle_guard(client: Client, message: Message):
     try:
         member = await client.get_chat_member(message.chat.id, message.from_user.id)
-        if member.status != enums.ChatMemberStatus.OWNER:
+        if member.status not in [enums.ChatMemberStatus.OWNER, enums.ChatMemberStatus.ADMINISTRATOR]:
             return 
 
         is_on = (message.command[0] == "editon")
         CHAT_SETTINGS[message.chat.id] = is_on
         
-        durum = "AKTIF" if is_on else "DEAKTIF"
-        msg = await message.reply(f" online {durum}")
+        durum = "AKTİF" if is_on else "DEAKTİF"
+        msg = await message.reply(f"Koruma şu an {durum}")
         
         await message.delete()
         await asyncio.sleep(3)
         await msg.delete()
     except Exception as e:
-        print(f"Yetki hatasi: {e}")
+        print(f"Yetki hatası: {e}")
 
 @app.on_message(filters.group & ~filters.command(["editon", "editoff"]), group=1)
 async def track_messages(client: Client, message: Message):
     message_store[message.id] = get_content_fingerprint(message)
-    
     if len(message_store) > 3000:
         oldest_key = next(iter(message_store))
         message_store.pop(oldest_key)
@@ -82,13 +77,9 @@ async def track_messages(client: Client, message: Message):
 async def handle_edits(client: Client, message: Message):
     if not CHAT_SETTINGS.get(message.chat.id, True):
         return
-        
     if message.from_user and message.from_user.is_bot:
         return
-
-    if message.location:
-        return
-
+    
     original = message_store.get(message.id)
     current = get_content_fingerprint(message)
 
@@ -102,21 +93,30 @@ async def handle_edits(client: Client, message: Message):
 
     try:
         user_mention = message.from_user.mention if message.from_user else "Kullanıcı"
-        
         await message.delete()
-        
         warning = await client.send_message(
             message.chat.id, 
-            f" {user_mention}, bu grupta mesaj düzenlemek yasaktır. mesajın silindi!"
+            f"⚠️ {user_mention}, bu grupta mesaj düzenlemek yasaktır. Mesajın silindi!"
         )
-        
-        message_store.pop(message.id, None)
         await asyncio.sleep(5)
         await warning.delete()
     except Exception as e:
-        print(f"Islem hatasi: {e}")
+        print(f"İşlem hatası: {e}")
+
+# --- Ana Çalıştırma Bloğu ---
+async def main():
+    print("Bot başlatılıyor...")
+    # Web sunucusunu ayrı thread'de başlat
+    Thread(target=run_web, daemon=True).start()
+    # Botu asenkron olarak başlat
+    await app.start()
+    print("Bot ve Web sunucusu çalışıyor.")
+    # Botun açık kalmasını sağla
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("kurşun adres sormaz ki")
-    Thread(target=run_web, daemon=True).start()
-    app.run()
+    try:
+        # Python 3.14+ için en güvenli çalışma yöntemi
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
