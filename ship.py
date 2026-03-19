@@ -16,7 +16,7 @@ def run():
 
 # --- AYARLAR ---
 OWNER_ID = 6534222591
-BOT_TOKEN = "TOKEN_BURAYA"
+BOT_TOKEN = "8681886836:AAHhwFTYmH4sK7n0kSv2ORsuW6B_zzgmpRU"
 status = {"is_active": True}
 
 # --- TÜM BUTONLARIN OLDUĞU PANEL ---
