@@ -17,7 +17,7 @@ def run():
 
 # --- AYARLAR ---
 OWNER_ID = 6534222591
-BOT_TOKEN = "TOKEN_BURAYA"
+BOT_TOKEN = "8681886836:AAGMc-PbRvZIjLu2pjPM8UMcs0SiJ2XkkkM"
 status = {"is_active": True}
 
 async def promote_user(chat_id, user_id, context):
