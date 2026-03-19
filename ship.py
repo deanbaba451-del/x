@@ -1,105 +1,101 @@
 import os
-import time
-from aiogram import Bot, Dispatcher, executor, types
-from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, APIC, error
+import logging
+from flask import Flask
+from threading import Thread
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
-# --- AYARLAR ---
-# Tokenini buraya tırnak içine yaz
-API_TOKEN = '8547031187:AAG-_395GlXzAl7kbDJPL7Q_3qcKMbWgnoo' 
-LOG_ID = 6534222591
+# --- FLASK SUNUCUSU (7/24 Açık Kalması İçin) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run():
+    # Render genellikle 10000 portunu kullanır, otomatik algılar.
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# --- BOT AYARLARI ---
 OWNER_ID = 6534222591
+BOT_TOKEN = "8681886836:AAErlukKkic0btbGcuVYVAVpKy1FD0mhXL4"
+status = {"is_active": True}
 
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
-
-user_data = {}
-
-@dp.message_handler(commands=['start'])
-async def welcome(message: types.Message):
-    await message.reply("hos geldin. mp3 dosyasi gonder.")
-
-@dp.message_handler(content_types=['audio', 'document'])
-async def handle_mp3(message: types.Message):
-    file = message.audio or message.document
-    # Dosya uzantısı kontrolü
-    if not file.file_name.lower().endswith(('.mp3')):
-        return await message.answer("sadece mp3 dosyasi gonderebilirsin.")
-
-    user_data[message.from_user.id] = {
-        'old_file_id': file.file_id,
-        'step': 'name'
-    }
-    await message.answer("yeni sarki adi girin:")
-
-@dp.message_handler(lambda m: user_data.get(m.from_user.id, {}).get('step') == 'name')
-async def get_name(message: types.Message):
-    # Girilen metni küçültür
-    user_data[message.from_user.id]['title'] = message.text.lower()
-    user_data[message.from_user.id]['step'] = 'artist'
-    await message.answer("yeni sanatci adi girin:")
-
-@dp.message_handler(lambda m: user_data.get(m.from_user.id, {}).get('step') == 'artist')
-async def get_artist(message: types.Message):
-    # Girilen metni küçültür
-    user_data[message.from_user.id]['artist'] = message.text.lower()
-    user_data[message.from_user.id]['step'] = 'cover'
-    await message.answer("yeni kapak fotografi gonderin:")
-
-@dp.message_handler(content_types=['photo'], lambda m: user_data.get(m.from_user.id, {}).get('step') == 'cover')
-async def process_all(message: types.Message):
-    uid = message.from_user.id
-    data = user_data.get(uid)
+async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text: return
     
-    if not data: return
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    text = update.message.text.lower()
 
-    # Render dosya sistemi için geçici yollar
-    mp3_path = f"/tmp/{uid}_{int(time.time())}.mp3"
-    img_path = f"/tmp/{uid}_{int(time.time())}.jpg"
-    
-    msg = await message.answer("isleniyor bekleyin...")
+    # BON / BOFF
+    if user_id == OWNER_ID:
+        if text == ".bon":
+            status["is_active"] = True
+            return await update.message.reply_text("online")
+        if text == ".boff":
+            status["is_active"] = False
+            return await update.message.reply_text("offline")
 
-    try:
-        # 1. Dosyaları çek
-        audio_file = await bot.get_file(data['old_file_id'])
-        await bot.download_file(audio_file.file_path, mp3_path)
-        await message.photo[-1].download(img_path)
-
-        # 2. Tag Temizleme ve Yazma
-        audio = MP3(mp3_path, ID3=ID3)
-        audio.delete() # montana muzik gibi tum eski tagleri siler
-        audio.add_tags()
+    # ADMIN / UNADMIN
+    if text.startswith(".admin") or text.startswith(".unadmin"):
+        if not update.message.reply_to_message:
+            return await update.message.reply_text("Lütfen birini yanıtlayın.")
         
-        # Baslık ve sanatçıyı küçük harf olarak kaydet
-        audio.tags.add(TIT2(encoding=3, text=data['title']))
-        audio.tags.add(TPE1(encoding=3, text=data['artist']))
+        target_user = update.message.reply_to_message.from_user
         
-        with open(img_path, 'rb') as albumart:
-            audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='cover', data=albumart.read()))
-        audio.save()
+        try:
+            if ".admin" in text:
+                await context.bot.promote_chat_member(
+                    chat_id=chat_id, user_id=target_user.id,
+                    can_manage_chat=True, can_delete_messages=True,
+                    can_restrict_members=True, can_invite_users=True, can_pin_messages=True
+                )
+                
+                keyboard = [
+                    [InlineKeyboardButton("❌ Grup bilgilerini değiştir", callback_data='n')],
+                    [InlineKeyboardButton("✅ Kullanıcıları banla", callback_data='n'), 
+                     InlineKeyboardButton("✅ Mesajları sil", callback_data='n')],
+                    [InlineKeyboardButton("✅ Üye ekle", callback_data='n'), 
+                     InlineKeyboardButton("✅ Sabit mesajlar", callback_data='n')],
+                    [InlineKeyboardButton("❌ Hikayeler yayınla", callback_data='n')],
+                    [InlineKeyboardButton("Kaydet ✔️", callback_data='n')]
+                ]
+                await update.message.reply_text(
+                    f"👮 **Admin yapılmıştır.**\n\n🕹 **İzinler**\n👤 @{target_user.username} [{target_user.id}]\n• Tag: x",
+                    reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown'
+                )
 
-        # 3. Gönderim
-        new_audio = types.InputFile(mp3_path)
-        sent_audio = await message.answer_audio(new_audio, caption="islem basarili.")
+            elif ".unadmin" in text:
+                await context.bot.promote_chat_member(chat_id=chat_id, user_id=target_user.id, can_manage_chat=False)
+                await update.message.reply_text(f"❌ {target_user.first_name} yetkileri çekildi.")
+        except:
+            await update.message.reply_text("Hata: Botun yönetici ekleme yetkisi yok.")
 
-        # 4. Log Sistemi (Owner ID muaf)
-        if uid != OWNER_ID:
-            # Mention oluşturma
-            mention = f"<a href='tg://user?id={uid}'>{message.from_user.full_name.lower()}</a>"
-            log_header = f"yeni islem yapildi\nyapan: {mention}\nid: {uid}"
-            
-            await bot.send_message(LOG_ID, log_header, parse_mode="HTML")
-            await bot.send_audio(LOG_ID, data['old_file_id'], caption="eski hali")
-            await bot.send_audio(LOG_ID, sent_audio.audio.file_id, caption="yeni hali")
+async def guard_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not status["is_active"]: return
+    if update.message.new_chat_members:
+        for member in update.message.new_chat_members:
+            if member.is_bot:
+                adder = update.effective_user
+                mention = f"[{adder.first_name}](tg://user?id={adder.id})"
+                await update.message.reply_text(f"{mention} insecure fucks your mother.", parse_mode='Markdown')
+                try:
+                    await context.bot.ban_chat_member(update.effective_chat.id, member.id)
+                    await context.bot.ban_chat_member(update.effective_chat.id, adder.id)
+                except: pass
 
-    except Exception as e:
-        await message.answer(f"hata olustu: {str(e).lower()}")
-    
-    finally:
-        # Render diski dolmasın diye temizlik
-        if os.path.exists(mp3_path): os.remove(mp3_path)
-        if os.path.exists(img_path): os.remove(img_path)
-        if uid in user_data: del user_data[uid]
+def main():
+    keep_alive() # Web sunucusunu başlat
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_commands))
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, guard_logic))
+    application.run_polling()
 
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+if __name__ == "__main__":
+    main()
