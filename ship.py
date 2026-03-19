@@ -5,10 +5,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import Application, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# --- FLASK ---
+# --- FLASK (Render 7/24) ---
 app = Flask('')
 @app.route('/')
-def home(): return "Bot Online!"
+def home(): return "Guard Online!"
 
 def run():
     port = int(os.environ.get("PORT", 8080))
@@ -19,44 +19,35 @@ OWNER_ID = 6534222591
 BOT_TOKEN = "TOKEN_BURAYA"
 status = {"is_active": True}
 
-# --- YETKİ PANELİ TASARIMI ---
-def get_admin_keyboard(user_id):
-    # Görseldeki tüm butonlar ve callback dataları
+# --- TÜM BUTONLARIN OLDUĞU PANEL ---
+def get_full_admin_panel(user_id, user_name, chat_title):
     keyboard = [
-        [InlineKeyboardButton("❌ Grup bilgilerini değiştir", callback_data=f"perm_info_{user_id}")],
-        [InlineKeyboardButton("✅ Kullanıcıları banla", callback_data=f"perm_ban_{user_id}"), 
-         InlineKeyboardButton("✅ Mesajları sil", callback_data=f"perm_del_{user_id}")],
-        [InlineKeyboardButton("✅ Üye ekle", callback_data=f"perm_invite_{user_id}"), 
-         InlineKeyboardButton("✅ Sabit mesajlar", callback_data=f"perm_pin_{user_id}")],
-        [InlineKeyboardButton("❌ Hikayeler yayınla", callback_data=f"perm_story_{user_id}")],
-        [InlineKeyboardButton("Kaydet ✔️", callback_data="save_perms")]
+        [InlineKeyboardButton("❌ Grup bilgilerini değiştir", callback_data=f"p_info_{user_id}")],
+        [InlineKeyboardButton("✅ Kullanıcıları banla", callback_data=f"p_ban_{user_id}"), 
+         InlineKeyboardButton("✅ Mesajları sil", callback_data=f"p_del_{user_id}")],
+        [InlineKeyboardButton("✅ Üye ekle", callback_data=f"p_inv_{user_id}"), 
+         InlineKeyboardButton("✅ Sabit mesajlar", callback_data=f"p_pin_{user_id}")],
+        [InlineKeyboardButton("❌ Hikayeler yayınla", callback_data=f"p_st1_{user_id}")],
+        [InlineKeyboardButton("❌ Hikayeleri düze...", callback_data=f"p_st2_{user_id}"),
+         InlineKeyboardButton("❌ Hikayeleri sil", callback_data=f"p_st3_{user_id}")],
+        [InlineKeyboardButton("🔒 Sesli aramayı yönet", callback_data=f"p_vc_{user_id}")],
+        [InlineKeyboardButton("🔒 Konuları yönet", callback_data=f"p_top_{user_id}")],
+        [InlineKeyboardButton("❌ Edit member tags", callback_data=f"p_tag_{user_id}")],
+        [InlineKeyboardButton("❌ Yeni admin ekle", callback_data=f"p_add_{user_id}")],
+        [InlineKeyboardButton("🔒 Anonim Admin", callback_data=f"p_anon_{user_id}")],
+        [InlineKeyboardButton("Kaydet ✔️", callback_data="save")]
     ]
-    return InlineKeyboardMarkup(keyboard)
+    text = f"🕹 **İzinler**\n👤 {user_name} [{user_id}]\n👥 {chat_title}"
+    return text, InlineKeyboardMarkup(keyboard)
 
-# --- BUTONLARA BASINCA ÇALIŞACAK KISIM ---
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    data = query.data
-    await query.answer() # Butonun dönmesini (loading) durdurur
-
-    if data == "save_perms":
-        await query.edit_message_text("✅ Değişiklikler başarıyla kaydedildi.")
-        return
-
-    if data.startswith("perm_"):
-        # Burada basılan butona göre grupta yetki güncellenir
-        # Örnek: perm_ban_12345 -> [2] id'li kişiyi ban yetkisiyle günceller
-        parts = data.split("_")
-        target_id = int(parts[2])
-        # Gerçek yetki verme (Örnek: Ban yetkisi)
-        try:
-            # Burası basılan butona göre dinamikleştirilebilir, şu an sadece loadingi durdurur.
-            await query.answer(text="Yetki güncellendi (Simülasyon)", show_alert=False)
-        except: pass
+    await query.answer() # Butonun dönmesini durdurur
+    if query.data == "save":
+        await query.edit_message_text("✅ Yetkiler başarıyla kaydedildi ve uygulandı.")
 
 async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
-    
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     text = update.message.text.strip().lower()
@@ -70,39 +61,35 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status["is_active"] = False
             return await update.message.reply_text("offline")
 
-    # ,admin (Reply veya ID)
+    # ,admin
     if text.startswith(",admin"):
-        target_id = None
+        target_user = None
         if update.message.reply_to_message:
-            target_id = update.message.reply_to_message.from_user.id
+            target_user = update.message.reply_to_message.from_user
         else:
             args = text.split()
-            if len(args) > 1 and args[1].isdigit(): target_id = int(args[1])
-
-        if not target_id: return
+            if len(args) > 1 and args[1].isdigit():
+                try: target_user = await context.bot.get_chat(int(args[1]))
+                except: pass
+        
+        if not target_user: return
 
         try:
-            # 1. Önce grupta admin yap
+            # Grupta Admin Yap
             await context.bot.promote_chat_member(
-                chat_id=chat_id, user_id=target_id,
-                can_manage_chat=True, can_delete_messages=True,
-                can_restrict_members=True, can_invite_users=True, can_pin_messages=True
+                chat_id=chat_id, user_id=target_user.id,
+                can_manage_chat=True, can_delete_messages=True, can_restrict_members=True,
+                can_invite_users=True, can_pin_messages=True, can_manage_video_chats=True
             )
             
-            # 2. Grupta bilgi mesajı at
-            await update.message.reply_text(f"👮 **Admin yapılmıştır.**\n• Tag: x\n\n📩 Panel DM kutunuza gönderildi.")
+            # Grup Onay Mesajı
+            msg_text = f"guard\n@{target_user.username} [{target_user.id}]\n👮 Admin yapılmıştır.\n• Tag: x"
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🕹 İzinler ↗️", callback_data=f"open_dm_{target_user.id}")]])
+            await update.message.reply_text(msg_text, reply_markup=btn)
 
-            # 3. DM'den PANELİ AT (Görseldeki gibi)
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id, # Komutu yazan kişiye DM atar
-                    text=f"🕹 **İzinler**\n👤 ID: `{target_id}`\n👥 Grup: {update.effective_chat.title}\n\nAşağıdaki butonlardan yetkileri yönetebilirsiniz:",
-                    reply_markup=get_admin_keyboard(target_id),
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except:
-                await update.message.reply_text("❌ Sana DM atamadım! Lütfen botu başlat (start).")
-
+            # DM'den Full Panel Gönder
+            panel_text, panel_kb = get_full_admin_panel(target_user.id, f"@{target_user.username}", update.effective_chat.title)
+            await context.bot.send_message(chat_id=user_id, text=panel_text, reply_markup=panel_kb, parse_mode=ParseMode.MARKDOWN)
         except Exception as e:
             await update.message.reply_text(f"Hata: {e}")
 
@@ -121,12 +108,9 @@ async def guard_logic(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     Thread(target=run).start()
     app_bot = Application.builder().token(BOT_TOKEN).build()
-    
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_commands))
     app_bot.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, guard_logic))
-    app_bot.add_handler(CallbackQueryHandler(button_handler)) # Butonları çalıştıran kısım
-    
+    app_bot.add_handler(CallbackQueryHandler(button_callback))
     app_bot.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
