@@ -5,10 +5,10 @@ from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
-from pytgcalls.types import AudioPiped
+from pytgcalls.types import MediaStream
 from yt_dlp import YoutubeDL
 
-# render port
+# render canli tutma
 app_web = Flask(__name__)
 @app_web.route('/')
 def index(): return "aktif"
@@ -26,18 +26,14 @@ auth_users = {SUDO_USER}
 tagging_active = []
 blacklist = set()
 
-bot = Client("notalar", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+bot = Client("hasret_muzik", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user = Client("asistan", api_id=API_ID, api_hash=API_HASH, session_string=SESSION)
 call = PyTgCalls(user)
 ytdl = YoutubeDL({"format": "bestaudio/best", "quiet": True, "noplaylist": True})
 
-# yetki ve blacklist kontrol
 def is_auth(uid): return uid in auth_users or uid == SUDO_USER
-@bot.on_message(group=-1)
-async def check_black(_, m):
-    if m.from_user and m.from_user.id in blacklist: m.stop_propagation()
 
-# --- etiket komutlari ---
+# tagger
 @bot.on_message(filters.command(["utag", "atag", "tag", "etag", "gtag", "davet"]) & filters.group)
 async def tagger(c, m):
     if not is_auth(m.from_user.id): return await m.reply("yetkiniz yok")
@@ -57,27 +53,7 @@ async def stop_tag(c, m):
         tagging_active.remove(m.chat.id)
         await m.reply("islem durduruldu")
 
-# --- yonetici/yetkili komutlari ---
-@bot.on_message(filters.command(["duraklat", "devam", "atla", "son", "ileri", "geri", "reload"]) & filters.group)
-async def control(c, m):
-    if not is_auth(m.from_user.id): return
-    await m.reply(f"{m.command[0]} basarili")
-
-@bot.on_message(filters.command("auth") & filters.user(SUDO_USER))
-async def add_auth(c, m):
-    if m.reply_to_message:
-        uid = m.reply_to_message.from_user.id
-        auth_users.add(uid)
-        await m.reply(f"{uid} yetki verildi")
-
-@bot.on_message(filters.command("blacklist") & filters.user(SUDO_USER))
-async def add_black(c, m):
-    if len(m.command) > 1:
-        target = int(m.command[1])
-        blacklist.add(target)
-        await m.reply(f"{target} kara listeye alindi")
-
-# --- oynatma komutlari ---
+# muzik
 @bot.on_message(filters.command(["oynat", "voynat"]) & filters.group)
 async def play(c, m):
     if len(m.command) < 2: return await m.reply("sarki adi yaz")
@@ -87,18 +63,28 @@ async def play(c, m):
     query = m.text.split(None, 1)[1]
     try:
         info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
-        await call.join_group_call(m.chat.id, AudioPiped(info['formats'][0]['url']))
+        await call.play(m.chat.id, MediaStream(info['formats'][0]['url']))
         await res.edit(f"oynatiliyor: {info['title'].lower()}")
     except Exception as e: await res.edit(f"hata: {str(e).lower()}")
 
-# --- diger komutlar ---
-@bot.on_message(filters.command(["ping", "help", "start", "sudolist", "eros", "slap", "indir", "ac", "activevc", "restart"]))
-async def misc(c, m):
+@bot.on_message(filters.command(["son", "dur", "duraklat", "devam", "atla"]))
+async def control(c, m):
+    if not is_auth(m.from_user.id): return
     cmd = m.command[0]
-    if cmd == "ping": await m.reply("bot aktif gecikme normal")
-    elif cmd == "start": await m.reply("notalar muzik baslatildi yardim icin menuye bak")
-    elif cmd == "sudolist": await m.reply(f"sudo listesi: {SUDO_USER}")
-    else: await m.reply(f"{cmd} komutu aktif")
+    try:
+        if cmd in ["son", "dur"]: await call.leave_call(m.chat.id)
+        await m.reply(f"{cmd} basarili")
+    except: pass
+
+@bot.on_message(filters.command("start"))
+async def start(c, m):
+    await m.reply_text(
+        "merhaba hasret muzik aktif yardim icin butona tikla",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("beni gruba ekle", url="https://t.me/hasret_muzik_bot?startgroup=true")],
+            [InlineKeyboardButton("destek", url="https://t.me/komtanim")]
+        ])
+    )
 
 async def boot():
     Thread(target=run_web, daemon=True).start()
