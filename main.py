@@ -4,7 +4,8 @@ from flask import Flask
 from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pytgcalls import PyTgCalls
+# YENİ IMPORT YÖNTEMİ
+from pytgcalls import PyTgCalls, filters as fl
 from pytgcalls.types import MediaStream
 from yt_dlp import YoutubeDL
 
@@ -24,10 +25,10 @@ SUDO_USER = 6534222591
 
 auth_users = {SUDO_USER}
 tagging_active = []
-blacklist = set()
 
 bot = Client("hasret_muzik", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user = Client("asistan", api_id=API_ID, api_hash=API_HASH, session_string=SESSION)
+# YENİ TANIMLAMA YÖNTEMİ
 call = PyTgCalls(user)
 ytdl = YoutubeDL({"format": "bestaudio/best", "quiet": True, "noplaylist": True})
 
@@ -58,7 +59,7 @@ async def stop_tag(c, m):
 async def play(c, m):
     if len(m.command) < 2: return await m.reply("sarki adi yaz")
     res = await m.reply("hazirlaniyor")
-    try: await bot.add_chat_members(m.chat.id, ASISTAN_ID)
+    try: await bot.add_chat_members(m.chat.id, [ASISTAN_ID])
     except: pass
     query = m.text.split(None, 1)[1]
     try:
@@ -67,13 +68,12 @@ async def play(c, m):
         await res.edit(f"oynatiliyor: {info['title'].lower()}")
     except Exception as e: await res.edit(f"hata: {str(e).lower()}")
 
-@bot.on_message(filters.command(["son", "dur", "duraklat", "devam", "atla"]))
-async def control(c, m):
+@bot.on_message(filters.command(["son", "dur"]))
+async def stop(c, m):
     if not is_auth(m.from_user.id): return
-    cmd = m.command[0]
     try:
-        if cmd in ["son", "dur"]: await call.leave_call(m.chat.id)
-        await m.reply(f"{cmd} basarili")
+        await call.hangup(m.chat.id)
+        await m.reply("durduruldu")
     except: pass
 
 @bot.on_message(filters.command("start"))
@@ -90,7 +90,7 @@ async def boot():
     Thread(target=run_web, daemon=True).start()
     await bot.start()
     await user.start()
-    await call.start()
+    await call.start() # pytgcalls baslatma
     await asyncio.idle()
 
 if __name__ == "__main__":
