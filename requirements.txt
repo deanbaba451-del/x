@@ -1,5 +1,2 @@
-aiogram==2.25.1
-instaloader==4.10.1
-requests==2.31.0
-beautifulsoup4==4.12.2
-asyncio==3.4.3
+telethon
+flask
