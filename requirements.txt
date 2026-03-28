@@ -1,2 +1,5 @@
-telethon
+pyrogram
+tgcrypto
+pytgcalls==1.1.2
+yt-dlp
 flask
