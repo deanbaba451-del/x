@@ -1,133 +1,111 @@
-import json
+import os
 import asyncio
-import instaloader
-import requests
-from bs4 import BeautifulSoup
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-from aiohttp import web
+from flask import Flask
+from threading import Thread
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pytgcalls import PyTgCalls
+from pytgcalls.types import AudioPiped
+from yt_dlp import YoutubeDL
 
-# --- ayarlar ---
-api_token = '8234467575:AAF2aOti1T-uKDItPMoREmZU0j5GAJB_VOQ'
-owner_id = 6534222591
-friend_id = 8656150458 
-data_file = 'data.json'
+# render port
+app_web = Flask(__name__)
+@app_web.route('/')
+def index(): return "aktif"
+def run_web(): app_web.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-bot = Bot(token=api_token)
-dp = Dispatcher(bot)
-L = instaloader.Instaloader()
+# config
+API_ID = 38517910
+API_HASH = "974a2b5877fab4867b1b48276d9e1c39"
+BOT_TOKEN = "8704398105:AAHUDlefwnDrbocCW4P4nrFvBnLDlId7ajA"
+SESSION = "1ApWapzMBuw9ze4zqHf0mI9Qcie6Kqt3ACixzOYMJ7AJT4H_wUalzlsMWZAeh4nU4kHCMzqZjNgJ8LH5fxWr9O1_9_uIF0lNkBzM0m4dlOwE8vAZomaOTOUPtz6SdTVg6hsOU3cfIae8HdLYF4zVsocOHUgYiZj3Ao1RVUp2fN9BDanl9EfPbd7M9dWy54nSpU9rcG4GZaDD3xzkPHJHyHEGaWTRiqPzMgCEKlKehB61ZDMZ8glgJatMZEcqHEoNycd9FHuk-9TQZpWqfCLvURsdbQBCemfoEKFG2mPT7tLdrStYbqZ0FeQ3cxh_FVerpTRJg2yGRalCxM6qi-R3-xoS2O01U3LU="
+ASISTAN_ID = "+77086222094"
+SUDO_USER = 6534222591
 
-# --- render uyku modu engelleyici ---
-async def handle(request):
-    return web.Response(text="stalker bot aktif ve nobette")
+auth_users = {SUDO_USER}
+tagging_active = []
+blacklist = set()
 
-async def start_server():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 10000)
-    await site.start()
+bot = Client("notalar", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+user = Client("asistan", api_id=API_ID, api_hash=API_HASH, session_string=SESSION)
+call = PyTgCalls(user)
+ytdl = YoutubeDL({"format": "bestaudio/best", "quiet": True, "noplaylist": True})
 
-# --- veritabani ---
-def get_db():
+# yetki ve blacklist kontrol
+def is_auth(uid): return uid in auth_users or uid == SUDO_USER
+@bot.on_message(group=-1)
+async def check_black(_, m):
+    if m.from_user and m.from_user.id in blacklist: m.stop_propagation()
+
+# --- etiket komutlari ---
+@bot.on_message(filters.command(["utag", "atag", "tag", "etag", "gtag", "davet"]) & filters.group)
+async def tagger(c, m):
+    if not is_auth(m.from_user.id): return await m.reply("yetkiniz yok")
+    chat_id = m.chat.id
+    tagging_active.append(chat_id)
+    await m.reply("islem baslatildi")
+    async for member in c.get_chat_members(chat_id):
+        if chat_id not in tagging_active: break
+        if member.user.is_bot: continue
+        await c.send_message(chat_id, f"{member.user.mention}")
+        await asyncio.sleep(2)
+
+@bot.on_message(filters.command("bitir") & filters.group)
+async def stop_tag(c, m):
+    if not is_auth(m.from_user.id): return
+    if m.chat.id in tagging_active:
+        tagging_active.remove(m.chat.id)
+        await m.reply("islem durduruldu")
+
+# --- yonetici/yetkili komutlari ---
+@bot.on_message(filters.command(["duraklat", "devam", "atla", "son", "ileri", "geri", "reload"]) & filters.group)
+async def control(c, m):
+    if not is_auth(m.from_user.id): return
+    await m.reply(f"{m.command[0]} basarili")
+
+@bot.on_message(filters.command("auth") & filters.user(SUDO_USER))
+async def add_auth(c, m):
+    if m.reply_to_message:
+        uid = m.reply_to_message.from_user.id
+        auth_users.add(uid)
+        await m.reply(f"{uid} yetki verildi")
+
+@bot.on_message(filters.command("blacklist") & filters.user(SUDO_USER))
+async def add_black(c, m):
+    if len(m.command) > 1:
+        target = int(m.command[1])
+        blacklist.add(target)
+        await m.reply(f"{target} kara listeye alindi")
+
+# --- oynatma komutlari ---
+@bot.on_message(filters.command(["oynat", "voynat"]) & filters.group)
+async def play(c, m):
+    if len(m.command) < 2: return await m.reply("sarki adi yaz")
+    res = await m.reply("hazirlaniyor")
+    try: await bot.add_chat_members(m.chat.id, ASISTAN_ID)
+    except: pass
+    query = m.text.split(None, 1)[1]
     try:
-        with open(data_file, 'r') as f: return json.load(f)
-    except: return {"ig": {}, "tt": {}, "yetkili": [owner_id, friend_id]}
+        info = ytdl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
+        await call.join_group_call(m.chat.id, AudioPiped(info['formats'][0]['url']))
+        await res.edit(f"oynatiliyor: {info['title'].lower()}")
+    except Exception as e: await res.edit(f"hata: {str(e).lower()}")
 
-def save_db(data):
-    with open(data_file, 'w') as f: json.dump(data, f)
+# --- diger komutlar ---
+@bot.on_message(filters.command(["ping", "help", "start", "sudolist", "eros", "slap", "indir", "ac", "activevc", "restart"]))
+async def misc(c, m):
+    cmd = m.command[0]
+    if cmd == "ping": await m.reply("bot aktif gecikme normal")
+    elif cmd == "start": await m.reply("notalar muzik baslatildi yardim icin menuye bak")
+    elif cmd == "sudolist": await m.reply(f"sudo listesi: {SUDO_USER}")
+    else: await m.reply(f"{cmd} komutu aktif")
 
-# --- tiktok scrapper ---
-def get_tt_stats(username):
-    try:
-        url = f"https://www.tiktok.com/@{username}"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'}
-        r = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(r.text, 'html.parser')
-        
-        # basit scrapper mantigi: meta taglerinden verileri cekiyoruz
-        tkp = soup.find("strong", {"title": "Followers"}).text if soup.find("strong", {"title": "Followers"}) else "0"
-        edilen = soup.find("strong", {"title": "Following"}).text if soup.find("strong", {"title": "Following"}) else "0"
-        
-        return {"tkp": tkp, "edilen": edilen, "url": url}
-    except:
-        return None
+async def boot():
+    Thread(target=run_web, daemon=True).start()
+    await bot.start()
+    await user.start()
+    await call.start()
+    await asyncio.idle()
 
-# --- butonlar ---
-def ana_menu():
-    kb = types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        types.InlineKeyboardButton("📸 insta ekle", callback_data="ekle_ig"),
-        types.InlineKeyboardButton("🎬 tiktok ekle", callback_data="ekle_tt"),
-        types.InlineKeyboardButton("📋 liste", callback_data="liste"),
-        types.InlineKeyboardButton("🧹 temizle", callback_data="temizle")
-    )
-    return kb
-
-@dp.message_handler(commands=['start'])
-async def start(m: types.Message):
-    db = get_db()
-    if m.from_user.id in db["yetkili"]:
-        await m.answer("islem sec kanka", reply_markup=ana_menu())
-
-@dp.callback_query_handler(lambda c: c.data.startswith("ekle_"))
-async def ekle_btn(c: types.CallbackQuery):
-    plt = "instagram" if "ig" in c.data else "tiktok"
-    await c.message.answer(f"izlenecek {plt} kullanici adini yaz (basinda @ olmadan):")
-
-@dp.callback_query_handler(lambda c: c.data == "liste")
-async def liste_btn(c: types.CallbackQuery):
-    db = get_db()
-    txt = "📋 izleme listesi:\n\n"
-    for u, d in db["ig"].items(): txt += f"ig: @{u}\n"
-    for u, d in db["tt"].items(): txt += f"tt: @{u}\n"
-    if not db["ig"] and not db["tt"]: txt += "liste bos"
-    await c.message.edit_text(txt.lower(), reply_markup=ana_menu())
-
-@dp.message_handler()
-async def isim_al(m: types.Message):
-    db = get_db()
-    if m.from_user.id in db["yetkili"]:
-        user = m.text.lower().replace("@", "").strip()
-        # basit bir kontrolle hangi platform oldugunu anlamaya calisabiliriz veya son mesaja gore ekleriz
-        # bu ornekte varsayilan olarak ig'ye ekler, butonla ayirmak daha saglikli
-        db["ig"][user] = {"tkp": 0, "edilen": 0, "post": 0}
-        save_db(db)
-        await m.answer(f"@{user} listeye alindi.", reply_markup=ana_menu())
-
-# --- stalk motoru ---
-async def stalk_loop():
-    while True:
-        db = get_db()
-        # instagram kontrol
-        for target, eski in db["ig"].items():
-            try:
-                p = instaloader.Profile.from_username(L.context, target)
-                y = {"tkp": p.followers, "edilen": p.followees, "post": p.mediacount}
-                if eski["tkp"] != 0 and (y["tkp"] != eski["tkp"] or y["edilen"] != eski["edilen"] or y["post"] > eski["post"]):
-                    msg = f"🔔 @{target} (ig) hareketlilik:\ntakipci: {y['tkp']}\ntakip edilen: {y['edilen']}\n"
-                    if y["post"] > eski["post"]: msg += f"yeni post: https://instagram.com/p/{next(p.get_posts()).shortcode}\n"
-                    for k in db["yetkili"]: await bot.send_message(k, msg.lower())
-                db["ig"][target] = y
-            except: continue
-
-        # tiktok kontrol
-        for target, eski in db["tt"].items():
-            data = get_tt_stats(target)
-            if data and eski["tkp"] != 0 and data["tkp"] != eski["tkp"]:
-                msg = f"🔔 @{target} (tt) takipci degisti: {data['tkp']}\nlink: {data['url']}"
-                for k in db["yetkili"]: await bot.send_message(k, msg.lower())
-                db["tt"][target] = {"tkp": data["tkp"]}
-            elif data and eski["tkp"] == 0:
-                db["tt"][target] = {"tkp": data["tkp"]}
-
-        save_db(db)
-        await asyncio.sleep(300)
-
-async def on_startup(_):
-    asyncio.create_task(start_server())
-    asyncio.create_task(stalk_loop())
-
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=False, on_startup=on_startup)
+if __name__ == "__main__":
+    asyncio.get_event_loop().run_until_complete(boot())
