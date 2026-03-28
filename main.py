@@ -4,8 +4,13 @@ from flask import Flask
 from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-# YENİ IMPORT YÖNTEMİ
-from pytgcalls import PyTgCalls, filters as fl
+
+# GARANTİ IMPORT YÖNTEMİ
+try:
+    from pytgcalls import PyTgCalls
+except ImportError:
+    from pytgcalls.pytgcalls import PyTgCalls
+
 from pytgcalls.types import MediaStream
 from yt_dlp import YoutubeDL
 
@@ -28,7 +33,6 @@ tagging_active = []
 
 bot = Client("hasret_muzik", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user = Client("asistan", api_id=API_ID, api_hash=API_HASH, session_string=SESSION)
-# YENİ TANIMLAMA YÖNTEMİ
 call = PyTgCalls(user)
 ytdl = YoutubeDL({"format": "bestaudio/best", "quiet": True, "noplaylist": True})
 
@@ -90,7 +94,7 @@ async def boot():
     Thread(target=run_web, daemon=True).start()
     await bot.start()
     await user.start()
-    await call.start() # pytgcalls baslatma
+    await call.start()
     await asyncio.idle()
 
 if __name__ == "__main__":
